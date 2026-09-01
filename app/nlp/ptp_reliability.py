@@ -33,4 +33,20 @@ class PtpReliabilityScorer:
     """
 
     def score(self, promises: int, fulfilled: int) -> ReliabilityAssessment:
-        raise NotImplementedError("TODO: ML track — see implementation_plan.md §10.3")
+        if promises < 0 or fulfilled < 0:
+            raise ValueError("promises and fulfilled cannot be negative")
+        if fulfilled > promises:
+            raise ValueError("fulfilled cannot exceed promises")
+        reliability = 1.0 if promises == 0 else fulfilled / promises
+        if reliability > 0.75:
+            band = ReliabilityBand.HIGH
+        elif reliability >= 0.50:
+            band = ReliabilityBand.MEDIUM
+        else:
+            band = ReliabilityBand.LOW
+        return ReliabilityAssessment(
+            reliability_score=round(reliability, 3),
+            band=band,
+            promises=promises,
+            fulfilled=fulfilled,
+        )
