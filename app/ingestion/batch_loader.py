@@ -40,11 +40,8 @@ DEFAULT_BATCH_PATH = PROJECT_ROOT / "data" / "synthetic_batch.csv"
 #   created_at                  int        event epoch seconds (bare ISO-8601
 #                                          also accepted and converted)
 #   persona                     str        persona id P1..P10 (§15.2)
-#   true_natural_probability    float      hidden ground truth 0..1 (§15.3)
-#   true_action_uplift          float      hidden ground truth (>= 0) (§15.3)
-#   true_payment_time           int        hidden days-to-payment (§15.3)
-#   true_fraud_state            int        0 | 1 hidden ground truth (§15.3)
-#   true_dispute_state          int        0 | 1 hidden ground truth (§15.3)
+# Hidden true_* labels live in data/ground_truth.json and must not be returned
+# from the model-facing batch loader (§15.3).
 # ---------------------------------------------------------------------------
 
 SCHEMA: dict[str, str] = {
@@ -60,11 +57,6 @@ SCHEMA: dict[str, str] = {
     "failure_reason": "str",
     "created_at": "datetime",
     "persona": "str",
-    "true_natural_probability": "float",
-    "true_action_uplift": "float",
-    "true_payment_time": "int",
-    "true_fraud_state": "int",
-    "true_dispute_state": "int",
 }
 
 REQUIRED_COLUMNS = frozenset(SCHEMA)
@@ -145,40 +137,10 @@ def _validate_and_coerce(raw: dict, row_number: int) -> dict:
                 f"row {row_number}: missing required column '{column}'"
             )
 
-    amounts = [
-        _coerce(row, row_number, "amount_paise", "int", check=lambda v: v >= 0),
-        _coerce(row, row_number, "true_payment_time", "int", check=lambda v: v >= 0),
-        _coerce(
-            row, row_number, "true_fraud_state", "int", check=lambda v: v in (0, 1)
-        ),
-        _coerce(
-            row, row_number, "true_dispute_state", "int", check=lambda v: v in (0, 1)
-        ),
-        _coerce(
-            row,
-            row_number,
-            "true_natural_probability",
-            "float",
-            check=lambda v: 0.0 <= v <= 1.0,
-        ),
-        _coerce(
-            row,
-            row_number,
-            "true_action_uplift",
-            "float",
-            check=lambda v: v >= 0.0,
-        ),
-        _coerce(row, row_number, "created_at", "datetime"),
-    ]
-    (
-        amount_paise,
-        true_payment_time,
-        true_fraud_state,
-        true_dispute_state,
-        true_natural_probability,
-        true_action_uplift,
-        created_at,
-    ) = amounts
+    amount_paise = _coerce(
+        row, row_number, "amount_paise", "int", check=lambda v: v >= 0
+    )
+    created_at = _coerce(row, row_number, "created_at", "datetime")
 
     obligation_type = row["obligation_type"]
     persona = row["persona"]
@@ -202,11 +164,6 @@ def _validate_and_coerce(raw: dict, row_number: int) -> dict:
         "failure_reason": row["failure_reason"],
         "created_at": created_at,
         "persona": persona,
-        "true_natural_probability": true_natural_probability,
-        "true_action_uplift": true_action_uplift,
-        "true_payment_time": true_payment_time,
-        "true_fraud_state": true_fraud_state,
-        "true_dispute_state": true_dispute_state,
     }
 
 
