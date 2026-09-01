@@ -1,0 +1,1 @@
+"""Loads synthetic data."""

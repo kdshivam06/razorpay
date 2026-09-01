@@ -1,0 +1,1 @@
+"""Expected days to payment."""

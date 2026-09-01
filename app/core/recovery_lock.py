@@ -1,0 +1,1 @@
+"""Single recovery path lock."""

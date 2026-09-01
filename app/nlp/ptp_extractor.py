@@ -1,0 +1,1 @@
+"""PTP date + amount extraction."""

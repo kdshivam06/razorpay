@@ -1,0 +1,1 @@
+"""Payment profile per client."""

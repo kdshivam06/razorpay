@@ -1,0 +1,1 @@
+"""Configurable contact windows."""

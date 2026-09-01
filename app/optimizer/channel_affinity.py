@@ -1,0 +1,1 @@
+"""Per-customer channel preference."""
