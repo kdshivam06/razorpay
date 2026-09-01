@@ -82,7 +82,7 @@ class CaseStateMachine:
         self, initial: RecoveryState = RecoveryState.DETECTED
     ) -> None:
         if not isinstance(initial, RecoveryState):
-            raise ValueError(f"Invalid initial state: {initial!r}")
+            raise TypeError(f"Invalid initial state: {initial!r}")
         self._state = initial
 
     @property

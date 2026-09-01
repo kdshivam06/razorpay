@@ -9,7 +9,7 @@ from app.core.obligation import (
     Obligation,
     ObligationStatus,
 )
-from app.core.recovery_lock import RecoveryLock
+from app.core.recovery_lock import RecoveryLock, RecoveryLockError
 
 
 def make_obl(original: int = 100_000, paid: int = 0, **kwargs) -> Obligation:
@@ -274,5 +274,5 @@ class TestDoubleDipPrevention:
     def test_wrong_holder_cannot_release_lock(self):
         lock = RecoveryLock()
         lock.acquire("OBL_1", holder="voice")
-        with pytest.raises(Exception):
+        with pytest.raises(RecoveryLockError):
             lock.release("OBL_1", holder="sms")
