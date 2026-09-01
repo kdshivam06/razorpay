@@ -48,8 +48,12 @@ class RecoveryCase(Base):
     state: Mapped[str] = mapped_column(String(25), server_default=text("'DETECTED'"))
 
     root_cause: Mapped[str] = mapped_column(String(100), server_default=text("''"))
-    fraud_score: Mapped[Decimal] = mapped_column(Numeric(4, 3), server_default=text("0"))
-    dispute_score: Mapped[Decimal] = mapped_column(Numeric(4, 3), server_default=text("0"))
+    fraud_score: Mapped[Decimal] = mapped_column(
+        Numeric(4, 3), server_default=text("0")
+    )
+    dispute_score: Mapped[Decimal] = mapped_column(
+        Numeric(4, 3), server_default=text("0")
+    )
     natural_pay_probability: Mapped[Decimal] = mapped_column(
         Numeric(4, 3), server_default=text("0")
     )
@@ -57,9 +61,7 @@ class RecoveryCase(Base):
     uplift_segment: Mapped[str] = mapped_column(String(30), server_default=text("''"))
 
     total_remaining: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
-    recovery_locked: Mapped[bool] = mapped_column(
-        Boolean, server_default=text("false")
-    )
+    recovery_locked: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
 
     communications: Mapped[list] = mapped_column(JSON, default=list)
     payment_links: Mapped[list] = mapped_column(JSON, default=list)
@@ -84,7 +86,9 @@ class Obligation(Base):
     case_id: Mapped[str | None] = mapped_column(
         ForeignKey("recovery_cases.case_id", ondelete="SET NULL")
     )
-    type: Mapped[str] = mapped_column(String(50))  # payment/invoice/subscription/mandate
+    type: Mapped[str] = mapped_column(
+        String(50)
+    )  # payment/invoice/subscription/mandate
     original_amount: Mapped[int] = mapped_column(BigInteger)
     paid_amount: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     refunded_amount: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
@@ -111,9 +115,7 @@ class AuditLog(Base):
 
     __tablename__ = "audit_log"
 
-    row_seq: Mapped[int] = mapped_column(
-        BigInteger, Identity(always=True), unique=True
-    )
+    row_seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
     id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True),
         server_default=text("gen_random_uuid()"),

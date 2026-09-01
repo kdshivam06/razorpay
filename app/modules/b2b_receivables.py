@@ -26,4 +26,6 @@ class B2BReceivablesModule:
         raise NotImplementedError("TODO: ML track — see implementation_plan.md §9.4")
 
     def top_workload(self, invoices: list[dict], limit: int = 20) -> list[str]:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §9.4")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §9.4"
+        )

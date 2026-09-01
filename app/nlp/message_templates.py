@@ -21,7 +21,9 @@ class TemplateEngine:
     customer_name, amount, payment_link, expiry, merchant_name ALL come from
     backend truth (§10.7)."""
 
-    def render(self, template_key: str, variables: dict, locale: str = "en") -> RenderedTemplate:
+    def render(
+        self, template_key: str, variables: dict, locale: str = "en"
+    ) -> RenderedTemplate:
         raise NotImplementedError("TODO: ML track — see implementation_plan.md §10.7")
 
     def has_template(self, template_key: str) -> bool:

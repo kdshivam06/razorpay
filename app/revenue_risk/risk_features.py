@@ -39,7 +39,9 @@ class FeatureBuilder:
     """Builds a RiskFeatures vector for a RecoveryCase."""
 
     def build(self, case: RecoveryCase, raw_event: dict) -> RiskFeatures:
-        raise NotImplementedError("TODO: ML track — see implementation_plan.md §5.1, §15.3")
+        raise NotImplementedError(
+            "TODO: ML track — see implementation_plan.md §5.1, §15.3"
+        )
 
     def to_frame(self, cases: list[RiskFeatures]) -> pd.DataFrame:
         raise NotImplementedError("TODO: ML track — see implementation_plan.md §5.1")

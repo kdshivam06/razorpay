@@ -23,10 +23,16 @@ class DashboardApi:
     """Serves the §14 waterfall/scorecard panels."""
 
     def waterfall(self) -> Waterfall:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §14.1")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §14.1"
+        )
 
     def scorecard(self) -> dict[str, object]:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §14.2")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §14.2"
+        )
 
     def decision_trace(self, case_id: str) -> DecisionTrace:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §13.3")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §13.3"
+        )

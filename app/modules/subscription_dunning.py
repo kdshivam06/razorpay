@@ -24,5 +24,7 @@ class SubscriptionDunningModule:
     The #1 compliance trap: customer-revoked mandate = PERMANENT STOP (halt);
     bank-revoked = safe to send re-auth. Distinguish via error.source."""
 
-    def dunning_step(self, subscription_id: str, state: SubscriptionState) -> DunningDecision:
+    def dunning_step(
+        self, subscription_id: str, state: SubscriptionState
+    ) -> DunningDecision:
         raise NotImplementedError("TODO: ML track — see implementation_plan.md §9.3")

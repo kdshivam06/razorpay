@@ -49,7 +49,9 @@ TRANSITIONS: dict[RecoveryState, frozenset[RecoveryState]] = {
     RecoveryState.POLICY_CHECK: frozenset(
         {RecoveryState.APPROVED, RecoveryState.BLOCKED}
     ),
-    RecoveryState.APPROVED: frozenset({RecoveryState.SCHEDULED, RecoveryState.EXECUTING}),
+    RecoveryState.APPROVED: frozenset(
+        {RecoveryState.SCHEDULED, RecoveryState.EXECUTING}
+    ),
     RecoveryState.BLOCKED: frozenset(),
     RecoveryState.SCHEDULED: frozenset({RecoveryState.EXECUTING}),
     RecoveryState.EXECUTING: frozenset(
@@ -78,9 +80,7 @@ class InvalidCaseTransition(ValueError):
 class CaseStateMachine:
     """Plain-Python FSM driving the lifecycle of a recovery case."""
 
-    def __init__(
-        self, initial: RecoveryState = RecoveryState.DETECTED
-    ) -> None:
+    def __init__(self, initial: RecoveryState = RecoveryState.DETECTED) -> None:
         if not isinstance(initial, RecoveryState):
             raise TypeError(f"Invalid initial state: {initial!r}")
         self._state = initial

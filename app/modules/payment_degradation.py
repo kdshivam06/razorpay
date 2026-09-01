@@ -18,9 +18,9 @@ class DegradationDecision:
 class PaymentDegradationModule:
     """Handles payment.downtime.* signals (§9.1):
 
-      HIGH severity for an instrument → disable that payment option
-      fail during downtime → payment link with alternate method
-      downtime resolves → re-enable instrument, cancel pending links
+    HIGH severity for an instrument → disable that payment option
+    fail during downtime → payment link with alternate method
+    downtime resolves → re-enable instrument, cancel pending links
     """
 
     def on_downtime_start(self, instrument: str, severity: str) -> DegradationDecision:

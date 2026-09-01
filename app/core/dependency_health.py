@@ -38,9 +38,7 @@ class DependencyHealth:
             self._dependencies[name] = Dependency(name=name, critical=critical)
 
     def report(self, name: str, status: DependencyStatus, reason: str = "") -> None:
-        dep = self._dependencies.setdefault(
-            name, Dependency(name=name, critical=False)
-        )
+        dep = self._dependencies.setdefault(name, Dependency(name=name, critical=False))
         dep.status = status
         dep.reason = reason
 
@@ -72,7 +70,8 @@ class DependencyHealth:
         `action_kind`: "contact" (outbound comms) or "financial" (irreversible).
         """
         down_critical = [
-            dep for dep in self._dependencies.values()
+            dep
+            for dep in self._dependencies.values()
             if dep.critical and dep.status is DependencyStatus.DOWN
         ]
         if not down_critical:

@@ -18,5 +18,9 @@ class WorkloadOptimizer:
     """Produces 'Today's Top 20 Cases' for human collectors, ranked by expected
     recovery / effort (§9.4)."""
 
-    def plan(self, cases: list[dict], collector_ids: list[str], limit: int = 20) -> list[Workload]:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §9.4")
+    def plan(
+        self, cases: list[dict], collector_ids: list[str], limit: int = 20
+    ) -> list[Workload]:
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §9.4"
+        )

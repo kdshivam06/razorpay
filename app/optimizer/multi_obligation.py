@@ -29,7 +29,9 @@ class MultiObligationOptimizer:
         customer_cases: list[RecoveryCase],
         max_contacts_per_day: int,
     ) -> CustomerPortfolioDecision:
-        raise NotImplementedError("TODO: ML track — see implementation_plan.md §6.7, §6.8")
+        raise NotImplementedError(
+            "TODO: ML track — see implementation_plan.md §6.7, §6.8"
+        )
 
 
 class CustomerContactBudget:

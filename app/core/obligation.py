@@ -132,7 +132,9 @@ class Obligation:
         if amount is None:
             amount = self.remaining_amount
         if amount <= 0 or amount > self.remaining_amount:
-            raise AmountError(f"Disputed amount {amount} invalid vs remaining {self.remaining_amount}")
+            raise AmountError(
+                f"Disputed amount {amount} invalid vs remaining {self.remaining_amount}"
+            )
         self.disputed_amount = min(self.disputed_amount + amount, self.remaining_amount)
         self.status = ObligationStatus.DISPUTED
         return self.status

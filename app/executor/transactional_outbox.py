@@ -23,10 +23,16 @@ class TransactionalOutbox:
     desync from the DB, in either direction (§8.1, §13.5)."""
 
     def append(self, command: OutboxCommand) -> None:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §8.1")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §8.1"
+        )
 
     def claim_next(self) -> OutboxCommand | None:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §8.1")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §8.1"
+        )
 
     def worker_loop_tick(self) -> int:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §8.1")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §8.1"
+        )

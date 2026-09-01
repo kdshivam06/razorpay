@@ -25,14 +25,18 @@ class CustomerPreferenceEngine:
     """
 
     def load_preferences(self, customer_id: str) -> ContactPreference:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §7.4")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §7.4"
+        )
 
-    def can_contact(
-        self, customer_id: str, channel: str, at: datetime
-    ) -> bool:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §7.4")
+    def can_contact(self, customer_id: str, channel: str, at: datetime) -> bool:
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §7.4"
+        )
 
     def allowed_window(
         self, customer_id: str, channel: str, at: datetime
     ) -> tuple[datetime, datetime]:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §7.4")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §7.4"
+        )

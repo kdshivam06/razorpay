@@ -23,10 +23,16 @@ class SubscriptionOps:
     PERMANENT STOP and must never reach here."""
 
     def pause(self, subscription_id: str) -> SubscriptionOpResult:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §9.3, §8")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §9.3, §8"
+        )
 
     def resume(self, subscription_id: str) -> SubscriptionOpResult:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §9.3, §8")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §9.3, §8"
+        )
 
     def cancel(self, subscription_id: str) -> SubscriptionOpResult:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §9.3, §8")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §9.3, §8"
+        )

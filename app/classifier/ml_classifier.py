@@ -23,7 +23,9 @@ class ClassificationModel:
         raise NotImplementedError("TODO: ML track — see implementation_plan.md §2.4")
 
     def predict_proba(self, features: dict[str, Any]) -> dict[RootCause, float]:
-        raise NotImplementedError("TODO: ML track — see implementation_plan.md §5.1, §12.4")
+        raise NotImplementedError(
+            "TODO: ML track — see implementation_plan.md §5.1, §12.4"
+        )
 
     def predict(self, features: dict[str, Any]) -> RootCause:
         raise NotImplementedError("TODO: ML track — see implementation_plan.md §5.1")

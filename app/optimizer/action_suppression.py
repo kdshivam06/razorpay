@@ -29,12 +29,14 @@ class SuppressionVerdict:
 class ActionSuppressor:
     """Blocks an action before execution when any §6.5 condition holds:
 
-      already paid / contacted recently / active link / human conversation /
-      active PTP / disputed / opted out
+    already paid / contacted recently / active link / human conversation /
+    active PTP / disputed / opted out
     """
 
     def check(self, case: RecoveryCase, action: Action) -> SuppressionVerdict:
         raise NotImplementedError("TODO: ML track — see implementation_plan.md §6.5")
 
     def suppressed_actions(self, case: RecoveryCase) -> list[str]:
-        raise NotImplementedError("TODO: ML track — see implementation_plan.md §6.5, §13.5")
+        raise NotImplementedError(
+            "TODO: ML track — see implementation_plan.md §6.5, §13.5"
+        )

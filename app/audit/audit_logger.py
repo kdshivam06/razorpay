@@ -37,7 +37,9 @@ class AuditLogger:
         action: str | None,
         **attrs: object,
     ) -> AuditEntry:
-        raise NotImplementedError("TODO: ML track — see implementation_plan.md §13.2, §13.6")
+        raise NotImplementedError(
+            "TODO: ML track — see implementation_plan.md §13.2, §13.6"
+        )
 
     def verify_chain(self) -> list[str]:
         raise NotImplementedError("TODO: ML track — see implementation_plan.md §13.2")

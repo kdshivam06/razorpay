@@ -27,9 +27,9 @@ class ReliabilityAssessment:
 class PtpReliabilityScorer:
     """Scores promise reliability; drives the hold period philosophy:
 
-      HIGH (>75%)  → honor promised date
-      MEDIUM (50-75%) → shorter hold
-      LOW (<50%)   → do not accept PTP; human escalation
+    HIGH (>75%)  → honor promised date
+    MEDIUM (50-75%) → shorter hold
+    LOW (<50%)   → do not accept PTP; human escalation
     """
 
     def score(self, promises: int, fulfilled: int) -> ReliabilityAssessment:

@@ -52,9 +52,7 @@ class EventInbox:
             return self._purge_locked(resolved)
 
     def _purge_locked(self, now: float) -> int:
-        expired = [
-            eid for eid, expires in self._expires_at.items() if expires <= now
-        ]
+        expired = [eid for eid, expires in self._expires_at.items() if expires <= now]
         for eid in expired:
             del self._expires_at[eid]
         return len(expired)

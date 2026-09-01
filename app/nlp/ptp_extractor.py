@@ -20,8 +20,8 @@ class PtpExtraction:
 class PtpExtractor:
     """Extracts PTP promise metadata, handling complex forms like:
 
-      'half abhi, baaki Friday' | 'next salary ke baad' |
-      'month-end tak clear' | '₹20k today, remaining next week'
+    'half abhi, baaki Friday' | 'next salary ke baad' |
+    'month-end tak clear' | '₹20k today, remaining next week'
     """
 
     def extract(self, text: str, language: str = "hinglish") -> PtpExtraction:

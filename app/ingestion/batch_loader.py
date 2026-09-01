@@ -148,7 +148,9 @@ def _validate_and_coerce(raw: dict, row_number: int) -> dict:
     amounts = [
         _coerce(row, row_number, "amount_paise", "int", check=lambda v: v >= 0),
         _coerce(row, row_number, "true_payment_time", "int", check=lambda v: v >= 0),
-        _coerce(row, row_number, "true_fraud_state", "int", check=lambda v: v in (0, 1)),
+        _coerce(
+            row, row_number, "true_fraud_state", "int", check=lambda v: v in (0, 1)
+        ),
         _coerce(
             row, row_number, "true_dispute_state", "int", check=lambda v: v in (0, 1)
         ),

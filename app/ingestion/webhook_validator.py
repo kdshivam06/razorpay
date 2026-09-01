@@ -37,7 +37,7 @@ def parse_signature(signature_header: str | None) -> str | None:
         return None
     sig = signature_header.strip()
     if sig.lower().startswith("sha256="):
-        sig = sig[len("sha256="):].strip()
+        sig = sig[len("sha256=") :].strip()
     if len(sig) != 64 or any(c not in "0123456789abcdefABCDEF" for c in sig):
         return None
     return sig
@@ -142,7 +142,9 @@ def validate_event(
     resolved_now = now if now is not None else time.time()
 
     if not signature_header:
-        raise WebhookRejected("Missing X-Razorpay-Signature header", "MISSING_SIGNATURE")
+        raise WebhookRejected(
+            "Missing X-Razorpay-Signature header", "MISSING_SIGNATURE"
+        )
     if parse_signature(signature_header) is None:
         raise WebhookRejected("Malformed signature header", "MALFORMED_SIGNATURE")
 

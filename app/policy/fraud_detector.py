@@ -25,7 +25,11 @@ class FraudDetector:
     (§7.7)."""
 
     def assess(self, features: dict[str, float]) -> FraudVerdict:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §7.1, §7.7")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §7.1, §7.7"
+        )
 
     def assert_not_fraudulent(self, fraud_score: float, threshold: float) -> None:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §7.1")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §7.1"
+        )

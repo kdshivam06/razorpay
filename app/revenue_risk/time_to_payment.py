@@ -13,7 +13,9 @@ class TimeToPaymentModel:
     """Predicts WHEN a case pays, not just whether (§5.2)."""
 
     def __init__(self, artifact_path: Path | None = None) -> None:
-        raise NotImplementedError("TODO: ML track — see implementation_plan.md §5.2, §17.2")
+        raise NotImplementedError(
+            "TODO: ML track — see implementation_plan.md §5.2, §17.2"
+        )
 
     def expected_days_to_payment(self, features: dict[str, float]) -> float:
         raise NotImplementedError("TODO: ML track — see implementation_plan.md §5.2")

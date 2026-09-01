@@ -20,10 +20,16 @@ class IdempotencyManager:
     external effects (§16.1, §13.5)."""
 
     def new_key(self, scope: str) -> str:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §16.1")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §16.1"
+        )
 
     def check(self, key: str) -> bool:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §16.1")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §16.1"
+        )
 
     def release(self, key: str) -> None:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §16.1")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §16.1"
+        )

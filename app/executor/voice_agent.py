@@ -23,7 +23,9 @@ class MockTelephonyClient:
     """Mocked telephony backend — returns a scripted transcript for a caller."""
 
     def place_call(self, phone: str, script: dict, waited_s: int = 0) -> str:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §9.6")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §9.6"
+        )
 
 
 class VoiceRecovery:
@@ -31,5 +33,9 @@ class VoiceRecovery:
     PTP extraction → policy check → PTP creation. On ANGRY/opt-out intent it
     stops the voice flow, marks preference, and routes to human review."""
 
-    def handle_call(self, call_id: str, transcript: str, emotion: Emotion | None = None) -> VoiceCallOutcome:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §9.6")
+    def handle_call(
+        self, call_id: str, transcript: str, emotion: Emotion | None = None
+    ) -> VoiceCallOutcome:
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §9.6"
+        )

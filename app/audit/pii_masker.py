@@ -8,10 +8,16 @@ class PiiMasker:
     and dashboard output so sensitive contact data never leaks to screens."""
 
     def mask_phone(self, value: str) -> str:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §13.6")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §13.6"
+        )
 
     def mask_email(self, value: str) -> str:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §13.6")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §13.6"
+        )
 
     def mask_text(self, text: str) -> str:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §13.6, §10.6")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §13.6, §10.6"
+        )

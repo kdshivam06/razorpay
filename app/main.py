@@ -35,9 +35,7 @@ async def receive_webhook(
     """Receives a Razorpay webhook: HMAC-verify, freshness-check, dedup, DLQ."""
     body = await request.body()
     headers = (
-        {"x-razorpay-signature": x_razorpay_signature}
-        if x_razorpay_signature
-        else {}
+        {"x-razorpay-signature": x_razorpay_signature} if x_razorpay_signature else {}
     )
     result = _webhook_handler.handle(body, headers)
 

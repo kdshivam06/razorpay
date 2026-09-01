@@ -17,8 +17,8 @@ class CollectionItem:
 class CollectionPrioritizer:
     """Ranks by expected incremental VALUE, not largest amount (§9.4):
 
-      ₹2L invoice, natural payment 94% → LOW priority
-      ₹70K invoice, natural 25%, uplift 45% → HIGH priority.
+    ₹2L invoice, natural payment 94% → LOW priority
+    ₹70K invoice, natural 25%, uplift 45% → HIGH priority.
     """
 
     def rank(self, items: list[CollectionItem]) -> list[CollectionItem]:

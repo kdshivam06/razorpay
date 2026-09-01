@@ -23,7 +23,11 @@ class PlatformAwareness:
     """
 
     def history_for(self, customer_id: str) -> PlatformActionHistory:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §7.6")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §7.6"
+        )
 
     def should_duplicate_sms(self, history: PlatformActionHistory) -> bool:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §7.6")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §7.6"
+        )

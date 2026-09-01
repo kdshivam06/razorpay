@@ -37,7 +37,9 @@ def get_settings() -> Settings:
     try:
         return Settings()
     except ValidationError as exc:
-        missing = [str(err["loc"][0]) for err in exc.errors() if err["type"] == "missing"]
+        missing = [
+            str(err["loc"][0]) for err in exc.errors() if err["type"] == "missing"
+        ]
         if missing:
             raise RuntimeError(
                 "Missing required environment variables: " + ", ".join(sorted(missing))

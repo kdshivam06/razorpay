@@ -31,15 +31,18 @@ def webhook_body(
     created_at: int = NOW,
 ) -> bytes:
     return json.dumps(
-        {"id": event_id, "entity": "event", "entity.event": "payment.failed", "created_at": created_at}
+        {
+            "id": event_id,
+            "entity": "event",
+            "entity.event": "payment.failed",
+            "created_at": created_at,
+        }
     ).encode()
 
 
 @pytest.fixture(autouse=True)
 def _fresh_time(monkeypatch):
-    monkeypatch.setattr(
-        "app.ingestion.webhook_validator.time.time", lambda: NOW
-    )
+    monkeypatch.setattr("app.ingestion.webhook_validator.time.time", lambda: NOW)
 
 
 class TestSignatureParsing:
@@ -64,7 +67,9 @@ class TestSignatureParsing:
 class TestVerifySignature:
     def test_valid_bare_signature(self):
         body = webhook_body()
-        assert verify_signature(body, sign(body, CURRENT_SECRET), CURRENT_SECRET) is True
+        assert (
+            verify_signature(body, sign(body, CURRENT_SECRET), CURRENT_SECRET) is True
+        )
 
     def test_valid_sha256_envelope(self):
         body = webhook_body()
@@ -76,8 +81,7 @@ class TestVerifySignature:
     def test_wrong_secret_rejected(self):
         body = webhook_body()
         assert (
-            verify_signature(body, sign(body, "wrong_secret"), CURRENT_SECRET)
-            is False
+            verify_signature(body, sign(body, "wrong_secret"), CURRENT_SECRET) is False
         )
 
     def test_not_constant_but_safe_empty_inputs(self):
@@ -110,7 +114,9 @@ class TestValidateEvent:
 
     def test_malformed_signature_rejected(self):
         with pytest.raises(WebhookRejected) as exc:
-            validate_event(webhook_body(), "garbage-signature", [CURRENT_SECRET], now=NOW)
+            validate_event(
+                webhook_body(), "garbage-signature", [CURRENT_SECRET], now=NOW
+            )
         assert exc.value.kind == "MALFORMED_SIGNATURE"
 
     def test_tampered_body_rejected(self):
@@ -125,7 +131,9 @@ class TestValidateEvent:
     def test_missing_event_id_rejected(self):
         body = json.dumps({"entity": "event", "created_at": NOW}).encode()
         with pytest.raises(WebhookRejected) as exc:
-            validate_event(body, envelope(body, CURRENT_SECRET), [CURRENT_SECRET], now=NOW)
+            validate_event(
+                body, envelope(body, CURRENT_SECRET), [CURRENT_SECRET], now=NOW
+            )
         assert exc.value.kind == "MISSING_EVENT_ID"
 
 
@@ -185,7 +193,10 @@ class TestSecretRotation:
     def test_current_secret_works(self):
         body = webhook_body()
         verified = validate_event(
-            body, envelope(body, CURRENT_SECRET), [CURRENT_SECRET, PREVIOUS_SECRET], now=NOW
+            body,
+            envelope(body, CURRENT_SECRET),
+            [CURRENT_SECRET, PREVIOUS_SECRET],
+            now=NOW,
         )
         assert verified.secret_used == CURRENT_SECRET
 
@@ -213,7 +224,9 @@ class TestSecretRotation:
     def test_current_secret_alone_rejects_previous(self):
         body = webhook_body()
         with pytest.raises(WebhookRejected) as exc:
-            validate_event(body, envelope(body, PREVIOUS_SECRET), [CURRENT_SECRET], now=NOW)
+            validate_event(
+                body, envelope(body, PREVIOUS_SECRET), [CURRENT_SECRET], now=NOW
+            )
         assert exc.value.kind == "INVALID_SIGNATURE"
 
 

@@ -28,7 +28,9 @@ class IncrementalUpliftModel:
     """
 
     def __init__(self, artifact_path: Path | None = None) -> None:
-        raise NotImplementedError("TODO: ML track — see implementation_plan.md §5.3, §17.2")
+        raise NotImplementedError(
+            "TODO: ML track — see implementation_plan.md §5.3, §17.2"
+        )
 
     def uplift_for(self, features: dict[str, float], action: Action) -> float:
         raise NotImplementedError("TODO: ML track — see implementation_plan.md §5.3")

@@ -29,16 +29,24 @@ class InterventionOptimizer:
     selecting any action. NO_ACTION is a first-class outcome, not a fallback.
     """
 
-    def optimize(self, case: RecoveryCase, estimates: UpliftEstimates) -> OptimizationRecommendation:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §6.1, §6.2, §6.9")
+    def optimize(
+        self, case: RecoveryCase, estimates: UpliftEstimates
+    ) -> OptimizationRecommendation:
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §6.1, §6.2, §6.9"
+        )
 
     def build_candidates(
         self, case: RecoveryCase, estimates: UpliftEstimates
     ) -> list[CandidateAction]:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §6.2")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §6.2"
+        )
 
     def select_best(self, candidates: list[CandidateAction]) -> CandidateAction:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §6.2")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §6.2"
+        )
 
     def financial_stop_check(
         self,
@@ -46,4 +54,6 @@ class InterventionOptimizer:
         amount_remaining: int,
         minimum_incremental_paise: int,
     ) -> RecoveryStopReason | None:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §6.9")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §6.9"
+        )

@@ -17,13 +17,21 @@ class CooldownManager:
     if Redis is unavailable, outbound actions are refused (§16.1)."""
 
     def __init__(self, client: _RedisClient | None = None) -> None:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §7.1, §16.1")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §7.1, §16.1"
+        )
 
     def within_cooldown(self, customer_id: str, channel: str) -> bool:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §7.1")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §7.1"
+        )
 
     def touch(self, customer_id: str, channel: str, ttl_seconds: int) -> None:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §7.1")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §7.1"
+        )
 
     def backoff_seconds(self, customer_id: str, channel: str) -> int:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §7.1")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §7.1"
+        )

@@ -24,4 +24,6 @@ class RedTeamApi:
     """
 
     def run_attack(self, attack_name: str, payload: dict) -> RedTeamOutcome:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §16.1")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §16.1"
+        )

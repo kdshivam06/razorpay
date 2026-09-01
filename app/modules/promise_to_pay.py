@@ -22,8 +22,17 @@ class PromiseToPayTracker:
     """Tracks PTPs end-to-end: extraction (amount+date), reliability scoring,
     acceptance policy, and fulfilment history (§9.7, §10.2, §10.3)."""
 
-    def register(self, customer_id: str, extraction: PtpExtraction, reliability: ReliabilityAssessment) -> PtpTrackerEntry:
-        raise NotImplementedError("TODO: ML track — see implementation_plan.md §9.7, §10.2, §10.3")
+    def register(
+        self,
+        customer_id: str,
+        extraction: PtpExtraction,
+        reliability: ReliabilityAssessment,
+    ) -> PtpTrackerEntry:
+        raise NotImplementedError(
+            "TODO: ML track — see implementation_plan.md §9.7, §10.2, §10.3"
+        )
 
     def honour_or_escalate(self, customer_id: str) -> str:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §10.3")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §10.3"
+        )

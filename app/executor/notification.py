@@ -24,5 +24,9 @@ class NotificationSender:
     Financial amounts are backend truth via the template engine — the LLM is
     never allowed to invent them (§10.7)."""
 
-    def send(self, channel: str, template_key: str, variables: dict, note: str = "") -> NotificationRecord:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §10.7")
+    def send(
+        self, channel: str, template_key: str, variables: dict, note: str = ""
+    ) -> NotificationRecord:
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §10.7"
+        )

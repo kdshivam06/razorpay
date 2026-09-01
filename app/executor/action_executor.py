@@ -33,4 +33,6 @@ class ActionExecutor:
         raise NotImplementedError("TODO: Policy track — see implementation_plan.md §8")
 
     def execute_noop(self, case: RecoveryCase) -> ExecutionResult:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §6.1, §8")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §6.1, §8"
+        )

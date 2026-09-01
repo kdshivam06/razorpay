@@ -25,7 +25,9 @@ class PaymentPropensityModel:
     """Predicts the probability that a case pays within each horizon."""
 
     def __init__(self, artifact_path: Path | None = None) -> None:
-        raise NotImplementedError("TODO: ML track — see implementation_plan.md §5.1, §17.2")
+        raise NotImplementedError(
+            "TODO: ML track — see implementation_plan.md §5.1, §17.2"
+        )
 
     def propensity_curve(self, features: dict[str, float]) -> PropensityCurve:
         raise NotImplementedError("TODO: ML track — see implementation_plan.md §5.1")

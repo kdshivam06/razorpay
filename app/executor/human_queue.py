@@ -23,16 +23,24 @@ class HumanTaskQueue:
     """Human UI shows the full §13.3 decision trace with APPROVE/REJECT."""
 
     def enqueue(self, task: HumanTask) -> None:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §8.6")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §8.6"
+        )
 
     def next_highest_priority(self) -> HumanTask | None:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §8.6")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §8.6"
+        )
 
     def approve(self, task_id: str) -> None:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §8.6")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §8.6"
+        )
 
     def reject(self, task_id: str, reason: str) -> None:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §8.6")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §8.6"
+        )
 
 
 def priority_for(case_id: str) -> int:

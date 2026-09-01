@@ -35,4 +35,6 @@ class SimulationMode:
         *,
         execute_after: bool = False,
     ) -> SimulationReport:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §7.8")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §7.8"
+        )

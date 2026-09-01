@@ -28,16 +28,22 @@ class PaymentLinkLifecycle:
       partially paid → recover only the remaining amount
     """
 
-    def resolve_outstanding(
-        self, case_id: str, invoice_amount_paise: int
-    ) -> int:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §8.4")
+    def resolve_outstanding(self, case_id: str, invoice_amount_paise: int) -> int:
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §8.4"
+        )
 
     def create_or_reuse(self, case_id: str) -> PaymentLinkRecord:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §8.4")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §8.4"
+        )
 
     def cancel_active_link(self, case_id: str) -> None:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §8.4")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §8.4"
+        )
 
     def get(self, link_id: str) -> PaymentLinkRecord:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §8.4")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §8.4"
+        )

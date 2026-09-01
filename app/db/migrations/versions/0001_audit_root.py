@@ -4,6 +4,7 @@ Revision ID: 0001_audit_root
 Revises:
 Create Date: 2026-01-01 00:00:00
 """
+
 import sqlalchemy as sa
 from alembic import op
 
@@ -88,12 +89,14 @@ def upgrade() -> None:
         sa.Column("ptps", sa.JSON(), nullable=True),
         sa.Column("decisions", sa.JSON(), nullable=True),
         sa.Column("audit_events", sa.JSON(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()")
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()")
+        ),
     )
-    op.create_index(
-        "ix_recovery_cases_customer_id", "recovery_cases", ["customer_id"]
-    )
+    op.create_index("ix_recovery_cases_customer_id", "recovery_cases", ["customer_id"])
 
     op.create_table(
         "obligations",
@@ -115,8 +118,12 @@ def upgrade() -> None:
         sa.Column("merchant_id", sa.String(length=100), nullable=True),
         sa.Column("razorpay_entity_ids", sa.JSON(), nullable=True),
         sa.Column("recovery_locked", sa.Boolean(), server_default=sa.text("false")),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()")
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()")
+        ),
     )
     op.create_index("ix_obligations_customer_id", "obligations", ["customer_id"])
 
@@ -183,9 +190,7 @@ def upgrade() -> None:
         sa.Column("control_or_treatment", sa.String(length=20), nullable=True),
         sa.Column("attempt_number", sa.Integer(), server_default="1"),
         sa.Column("is_immutable", sa.Boolean(), server_default=sa.text("true")),
-        sa.CheckConstraint(
-            "current_hash ~ '^[a-f0-9]{64}$'", name=_HASH_CHECK
-        ),
+        sa.CheckConstraint("current_hash ~ '^[a-f0-9]{64}$'", name=_HASH_CHECK),
     )
     op.create_index("ix_audit_log_row_seq", "audit_log", ["row_seq"], unique=True)
     op.create_index("ix_audit_log_case_id", "audit_log", ["case_id"])
@@ -194,22 +199,18 @@ def upgrade() -> None:
     op.execute(_PREVENT_MODIFICATION)
     op.execute(_HASH_CHAIN)
 
-    op.execute(
-        """
+    op.execute("""
         CREATE TRIGGER audit_log_no_update_delete
         BEFORE UPDATE OR DELETE ON audit_log
         FOR EACH ROW
         EXECUTE FUNCTION audit_log_prevent_modification();
-        """
-    )
-    op.execute(
-        """
+        """)
+    op.execute("""
         CREATE TRIGGER audit_log_compute_hash
         BEFORE INSERT ON audit_log
         FOR EACH ROW
         EXECUTE FUNCTION audit_log_hash_chain();
-        """
-    )
+        """)
 
 
 def downgrade() -> None:

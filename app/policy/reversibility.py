@@ -18,13 +18,17 @@ class ReversibilityAssessment:
 class ReversibilityScorer:
     """Classifies actions by impact and autonomy (§6.4):
 
-      Low (full auto):      WAIT, INTERNAL_TASK, DRAFT_MESSAGE, SCHEDULE_RETRY
-      Medium (auto+policy): SMS, EMAIL, PAYMENT_LINK, VOICE
-      High (human):         CHARGE, REFUND, CANCEL_SUBSCRIPTION, LEGAL_ESCALATION
+    Low (full auto):      WAIT, INTERNAL_TASK, DRAFT_MESSAGE, SCHEDULE_RETRY
+    Medium (auto+policy): SMS, EMAIL, PAYMENT_LINK, VOICE
+    High (human):         CHARGE, REFUND, CANCEL_SUBSCRIPTION, LEGAL_ESCALATION
     """
 
     def impact_level(self, action: Action) -> ActionImpactLevel:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §6.4")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §6.4"
+        )
 
     def requires_human_approval(self, action: Action) -> bool:
-        raise NotImplementedError("TODO: Policy track — see implementation_plan.md §6.4")
+        raise NotImplementedError(
+            "TODO: Policy track — see implementation_plan.md §6.4"
+        )

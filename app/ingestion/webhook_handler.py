@@ -54,9 +54,7 @@ class WebhookHandler:
     ) -> None:
         self.inbox = inbox or EventInbox()
         self.dlq = dlq or DeadLetterQueue()
-        self._secrets: list[str] | None = (
-            list(secrets) if secrets is not None else None
-        )
+        self._secrets: list[str] | None = list(secrets) if secrets is not None else None
         self.max_age_seconds = max_age_seconds
         self.allowed_skew_seconds = allowed_skew_seconds
 
@@ -106,7 +104,9 @@ class WebhookHandler:
             return WebhookResult(
                 status=WebhookResultStatus.DUPLICATE, event_id=verified.event_id
             )
-        return WebhookResult(status=WebhookResultStatus.ACCEPTED, event_id=verified.event_id)
+        return WebhookResult(
+            status=WebhookResultStatus.ACCEPTED, event_id=verified.event_id
+        )
 
     def _dlq_entry(
         self,

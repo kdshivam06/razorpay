@@ -19,8 +19,12 @@ class OptimalTimingModel:
     """Predicts the best retry/contact time from payment history, hour, day,
     failure type, bank, method, and previous retries (§5.5)."""
 
-    def recommend(self, features: dict[str, float], now: datetime) -> TimingRecommendation:
-        raise NotImplementedError("TODO: ML track — see implementation_plan.md §5.5, §9.5")
+    def recommend(
+        self, features: dict[str, float], now: datetime
+    ) -> TimingRecommendation:
+        raise NotImplementedError(
+            "TODO: ML track — see implementation_plan.md §5.5, §9.5"
+        )
 
 
 class SalaryDayHeuristic:
