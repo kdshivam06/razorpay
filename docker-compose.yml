@@ -1,17 +1,40 @@
-# PostgreSQL + Redis for RecoveryOS
-version: "3.9"
+# PostgreSQL + Redis for RecoveryOS.
+# Credentials/DB mirror the components of DATABASE_URL in .env.example.
 
 services:
   postgres:
     image: postgres:15
+    container_name: recoveryos-postgres
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: recovery
-      POSTGRES_PASSWORD: recovery
-      POSTGRES_DB: recovery_os
+      POSTGRES_USER: "${POSTGRES_USER:-recovery}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-recovery}"
+      POSTGRES_DB: "${POSTGRES_DB:-recovery_os}"
     ports:
       - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   redis:
     image: redis:7
+    container_name: recoveryos-redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:
+  redisdata:
