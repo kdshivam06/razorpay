@@ -22,4 +22,30 @@ class DriftDetector:
     Flags MODEL / POLICY DRIFT; never auto-retrains (§12.5)."""
 
     def check(self, baseline: float, current: float, threshold: float) -> DriftSignal:
-        raise NotImplementedError("TODO: ML track — see implementation_plan.md §12.5")
+        if threshold < 0:
+            raise ValueError("threshold must be non-negative")
+
+        delta = current - baseline
+        absolute_delta = abs(delta)
+        relative_delta = absolute_delta / abs(baseline) if baseline else absolute_delta
+        drifted = absolute_delta >= threshold
+        if drifted:
+            detail = (
+                "MODEL / POLICY DRIFT flagged: "
+                f"metric moved from {baseline:.4f} to {current:.4f} "
+                f"(absolute_delta={absolute_delta:.4f}, relative_delta={relative_delta:.4f}). "
+                "Detection only; no automatic retraining."
+            )
+        else:
+            detail = (
+                "No drift flagged: "
+                f"metric moved from {baseline:.4f} to {current:.4f} "
+                f"within threshold {threshold:.4f}."
+            )
+        return DriftSignal(
+            metric="monitored_metric",
+            baseline=float(baseline),
+            current=float(current),
+            drifted=drifted,
+            detail=detail,
+        )
