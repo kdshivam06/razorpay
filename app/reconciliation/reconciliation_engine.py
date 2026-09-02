@@ -173,7 +173,7 @@ class ReconciliationEngine:
                 o.status
                 in {
                     ObligationStatus.RECOVERED,
-                    ObligationStatus.REFUNDED,
+                    ObligationStatus.WRITTEN_OFF,
                 }
                 for o in case.obligations
             )

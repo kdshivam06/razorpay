@@ -94,22 +94,22 @@ class PreActionReconciler:
                 cancelled_because="active_dispute",
             )
 
-        # ── Check 3: All obligations refunded ────────────────────
-        all_refunded = (
-            all(o.status == ObligationStatus.REFUNDED for o in case.obligations)
+        # ── Check 3: All obligations written off ────────────────────
+        all_written_off = (
+            all(o.status == ObligationStatus.WRITTEN_OFF for o in case.obligations)
             and len(case.obligations) > 0
         )
-        if all_refunded:
+        if all_written_off:
             logger.info(
-                "PRE-ACTION CANCEL: case %s fully refunded. Cancelling %s.",
+                "PRE-ACTION CANCEL: case %s fully written off. Cancelling %s.",
                 case.case_id,
                 action.value,
             )
             return PreActionVerdict(
                 allow=False,
-                reason="case fully refunded",
-                fresh_state="REFUNDED",
-                cancelled_because="fully_refunded",
+                reason="case fully written off",
+                fresh_state="WRITTEN_OFF",
+                cancelled_because="fully_written_off",
             )
 
         # ── Check 4: Recovery lock held by another path ──────────
