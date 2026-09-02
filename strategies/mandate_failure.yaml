@@ -1,2 +1,105 @@
-# Recovery strategy: mandate failure
+# Recovery strategy: mandate failure (§9.3, §9.5)
+# Subscription mandate failed — CRITICAL compliance distinction.
+
 name: mandate_failure
+version: "1.0"
+module: subscription_dunning
+severity: HIGH
+
+description: >
+  Subscription mandate debit failed. THE #1 COMPLIANCE TRAP:
+  Customer-revoked mandate = PERMANENT STOP (RBI harassment guidelines).
+  Bank-revoked mandate = safe to send re-auth.
+  Classifier MUST distinguish using error.description and error.source.
+
+root_cause_signals:
+  - error_code: "MANDATE_FAILED"
+  - error_code: "DEBIT_FAILED"
+  - error_source: "emandate"
+
+# §9.3 CRITICAL: The mandate distinction
+compliance:
+  customer_revoked:
+    detection:
+      - error_source: "customer"
+      - error_description_contains: ["revoked by customer", "cancelled by user"]
+    action: PERMANENT_STOP
+    rationale: >
+      Customer-revoked mandate recovery = harassment under RBI guidelines.
+      NO outbound contact. NO retry. Mark PERMANENT_STOP.
+    allowed_actions: ["NO_ACTION"]
+    log: "Customer-revoked mandate — PERMANENT STOP (RBI compliance)"
+
+  bank_revoked:
+    detection:
+      - error_source: "bank"
+      - error_description_contains: ["revoked by bank", "mandate expired"]
+    action: REQUEST_REAUTH
+    rationale: "Bank-revoked is safe to send re-auth request"
+
+timing:
+  initial_wait_hours: 4
+  max_retry_attempts: 3
+  retry_backoff: exponential
+  backoff_base_hours: 24
+  contact_window_start: "09:00"
+  contact_window_end: "20:00"
+
+action_sequence:
+  # Step 0: CLASSIFY mandate failure type (ALWAYS FIRST)
+  - step: 0
+    action: CLASSIFY_MANDATE
+    condition: "always"
+    rationale: "Must distinguish customer vs bank revocation BEFORE any action"
+
+  # Bank-revoked path
+  - step: 1
+    action: REQUEST_PAYMENT_METHOD_UPDATE
+    condition: "mandate_type == 'bank_revoked'"
+    rationale: "Re-auth request — safe for bank-revoked mandates"
+    cooldown_hours: 72
+
+  - step: 2
+    action: SEND_SMS
+    condition: "mandate_type == 'bank_revoked' AND hours_since_failure > 24"
+    template: subscription_dunning
+    rationale: "SMS with re-auth link"
+    cooldown_hours: 48
+
+  - step: 3
+    action: SEND_PAYMENT_LINK
+    condition: "mandate_type != 'customer_revoked' AND hours_since_failure > 72"
+    rationale: "Manual payment fallback"
+    link_expiry_hours: 168
+
+  # Transient failure path
+  - step: 4
+    action: RETRY_SAME_METHOD
+    condition: "mandate_type == 'transient' AND is_salary_day"
+    rationale: "Retry on salary day for transient failures"
+
+stopping_rules:
+  - "mandate_type == 'customer_revoked'"  # IMMEDIATE STOP
+  - "payment_detected"
+  - "mandate_re_authenticated"
+  - "subscription_cancelled_by_customer"
+  - "case_age_days > 30"
+
+suppression_rules:
+  - rule: "customer_revoked_any_contact"
+    action: PERMANENT_BLOCK
+    log: "Recovery after customer-revoked mandate prevented (RBI compliance)"
+  - rule: "mandate_already_reauthed"
+    action: CANCEL_ALL
+    log: "Contact after mandate re-auth prevented"
+
+uplift_expectations:
+  sure_thing: 0.05
+  persuadable: 0.40
+  lost_cause: 0.03
+  sleeping_dog: -0.15  # High risk of harassment complaint
+
+cost_model:
+  sms_paise: 25
+  payment_link_paise: 150
+  reauth_request_paise: 100

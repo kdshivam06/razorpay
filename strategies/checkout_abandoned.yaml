@@ -1,2 +1,82 @@
-# Recovery strategy: checkout abandoned
+# Recovery strategy: checkout abandoned (§9.2)
+# Customer started checkout but dismissed or timed out.
+
 name: checkout_abandoned
+version: "1.0"
+module: checkout_abandonment
+severity: LOW
+
+description: >
+  Customer initiated checkout but abandoned before completing payment.
+  High natural return rate for some segments. Anonymous users with no
+  contact info are UNRECOVERABLE.
+
+root_cause_signals:
+  - event: "ondismiss"
+  - event: "order.timeout"
+  - condition: "no order.paid within 30 minutes"
+
+edge_cases:
+  - "Cart changed after abandonment — send updated link"
+  - "Multiple abandonments same session — single contact only"
+  - "Anonymous user (no contact info) — mark UNRECOVERABLE"
+  - "Price-sensitive abandonment — do NOT offer discount autonomously"
+
+timing:
+  initial_wait_hours: 1  # Short wait — intent is fresh
+  max_contact_attempts: 2
+  contact_window_start: "09:00"
+  contact_window_end: "21:00"
+
+action_sequence:
+  - step: 1
+    action: NO_ACTION
+    condition: "natural_pay_probability > 0.6"
+    rationale: "High return probability — customer will likely come back"
+    max_wait_hours: 4
+
+  - step: 2
+    action: SEND_EMAIL
+    condition: "has_email AND hours_since_abandonment > 1"
+    template: checkout_reminder_email
+    rationale: "Gentle email nudge — lowest CX friction"
+    cooldown_hours: 24
+
+  - step: 3
+    action: SEND_WHATSAPP
+    condition: "has_phone AND whatsapp_consent AND hours_since_abandonment > 2"
+    template: checkout_reminder_whatsapp
+    rationale: "WhatsApp has higher open rate than email"
+    cooldown_hours: 48
+
+  - step: 4
+    action: SEND_PAYMENT_LINK
+    condition: "hours_since_abandonment > 4 AND natural_pay_probability < 0.3"
+    rationale: "Direct payment link for low-return-probability segments"
+    link_expiry_hours: 48
+
+stopping_rules:
+  - "payment_detected"
+  - "cart_modified"  # New cart = new recovery case
+  - "customer_opted_out"
+  - "no_contact_info"  # UNRECOVERABLE
+  - "case_age_hours > 48"
+
+suppression_rules:
+  - rule: "anonymous_user"
+    action: MARK_UNRECOVERABLE
+    log: "Checkout abandonment with no contact info — UNRECOVERABLE"
+  - rule: "multiple_same_session"
+    action: DEDUPLICATE
+    log: "Duplicate abandonment in same session prevented"
+
+uplift_expectations:
+  sure_thing: 0.01
+  persuadable: 0.25
+  lost_cause: 0.03
+  sleeping_dog: -0.05
+
+cost_model:
+  email_paise: 10
+  whatsapp_paise: 75
+  payment_link_paise: 150

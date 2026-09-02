@@ -1,2 +1,99 @@
-# Recovery strategy: ptp broken
+# Recovery strategy: promise-to-pay broken (§9.7, §10.2, §10.3)
+# Customer made a PTP but did not honor it.
+
 name: ptp_broken
+version: "1.0"
+module: promise_to_pay
+severity: MEDIUM
+
+description: >
+  Customer promised to pay by a specific date but did not.
+  Response depends on PTP reliability score:
+    High (>75%)  → Honor with gentle reminder, may be delayed
+    Medium (50-75%) → Shorter hold, payment link
+    Low (<50%)   → Don't accept future PTPs, human escalation
+
+root_cause_signals:
+  - event: "ptp.deadline_passed"
+  - condition: "ptp_status == 'BROKEN'"
+
+reliability_scoring:
+  # §10.3: PTP reliability = fulfilled / total promises
+  high_threshold: 0.75
+  medium_threshold: 0.50
+  
+  high_reliability:
+    action: GENTLE_REMINDER
+    rationale: "Historically reliable — may be temporary delay"
+    extra_grace_hours: 48
+
+  medium_reliability:
+    action: SEND_PAYMENT_LINK
+    rationale: "Mixed history — provide easy payment path"
+    extra_grace_hours: 24
+
+  low_reliability:
+    action: HUMAN_ESCALATION
+    rationale: "Unreliable promiser — don't accept future PTPs"
+    block_future_ptp: true
+
+timing:
+  initial_wait_hours: 24  # Grace period after PTP date
+  max_contact_attempts: 3
+  contact_window_start: "09:00"
+  contact_window_end: "20:00"
+
+action_sequence:
+  - step: 1
+    action: WAIT
+    condition: "ptp_reliability > 0.75"
+    rationale: "Reliable customer — give 48h grace period"
+    max_wait_hours: 48
+
+  - step: 2
+    action: SEND_SMS
+    condition: "hours_since_ptp_deadline > 24"
+    template: ptp_reminder_sms
+    rationale: "Gentle reminder that PTP date has passed"
+    cooldown_hours: 48
+
+  - step: 3
+    action: SEND_PAYMENT_LINK
+    condition: "hours_since_ptp_deadline > 48 AND ptp_reliability < 0.75"
+    rationale: "Payment link for medium-reliability customers"
+    link_expiry_hours: 72
+
+  - step: 4
+    action: CREATE_PTP
+    condition: "customer_offers_new_ptp AND ptp_reliability > 0.50"
+    rationale: "Accept new PTP only from medium+ reliability customers"
+
+  - step: 5
+    action: HUMAN_ESCALATION
+    condition: "ptp_reliability < 0.50 OR broken_ptp_count >= 3"
+    rationale: "Serial PTP breaker — human collector needed"
+
+stopping_rules:
+  - "payment_detected"
+  - "new_ptp_created"
+  - "customer_opted_out"
+  - "case_age_days > 14"
+
+suppression_rules:
+  - rule: "ptp_from_unreliable_customer"
+    action: REJECT_PTP
+    log: "PTP from unreliable customer rejected — human escalation"
+  - rule: "already_paid_after_ptp"
+    action: CANCEL_ALL
+    log: "Contact after PTP payment prevented"
+
+uplift_expectations:
+  sure_thing: 0.03
+  persuadable: 0.30
+  lost_cause: 0.05
+  sleeping_dog: -0.08
+
+cost_model:
+  sms_paise: 25
+  payment_link_paise: 150
+  human_escalation_paise: 5000

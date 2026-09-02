@@ -1,2 +1,101 @@
-# Recovery strategy: overdue invoice
+# Recovery strategy: overdue invoice — B2B receivables (§9.4)
+# Business customer has not paid an invoice past due date.
+
 name: overdue_invoice
+version: "1.0"
+module: b2b_receivables
+severity: MEDIUM
+
+description: >
+  B2B invoice is past due. Prioritize by expected INCREMENTAL value,
+  NOT largest amount. A ₹2L invoice with 94% natural payment rate
+  is LOW priority. A ₹70K invoice with 25% natural and 45% uplift
+  is HIGH priority.
+
+root_cause_signals:
+  - event: "invoice.overdue"
+  - condition: "days_past_due > 0"
+
+b2b_intelligence:
+  # Build per-client payment profile before acting (§9.4)
+  customer_profile_required: true
+  profile_fields:
+    - avg_payment_delay_days
+    - ptp_reliability
+    - dispute_rate
+    - typical_payment_day_range
+
+  # Don't chase if within normal delay window
+  chase_rule: "days_overdue > avg_payment_delay_days"
+
+timing:
+  # B2B has longer cycles than B2C
+  initial_wait_days: 3
+  max_contact_attempts: 4
+  contact_window_start: "09:00"
+  contact_window_end: "18:00"  # Business hours only
+
+action_sequence:
+  - step: 1
+    action: NO_ACTION
+    condition: "days_overdue <= avg_payment_delay_days"
+    rationale: "Within client's normal payment window — don't chase yet"
+
+  - step: 2
+    action: SEND_EMAIL
+    condition: "days_overdue > avg_payment_delay_days"
+    template: invoice_reminder_email
+    rationale: "Professional email reminder — B2B primary channel"
+    cooldown_hours: 72
+
+  - step: 3
+    action: SEND_PAYMENT_LINK
+    condition: "days_overdue > 7"
+    rationale: "Payment link for easy settlement"
+    link_expiry_hours: 168
+
+  - step: 4
+    action: OFFER_PARTIAL_PAYMENT
+    condition: "remaining_amount > 5000000 AND days_overdue > 14"
+    rationale: "Partial payment for large overdue amounts"
+
+  - step: 5
+    action: HUMAN_ESCALATION
+    condition: "remaining_amount > 10000000 OR days_overdue > 30"
+    rationale: "High-value or long-overdue — human collector needed"
+
+  - step: 6
+    action: VOICE_CALL
+    condition: "days_overdue > 21 AND not human_escalated"
+    rationale: "B2B voice follow-up for persistent overdue"
+
+collection_workload:
+  # Produce "Today's Top 20 Cases" for human collectors (§9.4)
+  rank_by: "expected_incremental_recovery / effort"
+  top_n: 20
+
+stopping_rules:
+  - "payment_detected"
+  - "invoice_cancelled"
+  - "customer_dispute"
+  - "case_age_days > 90"
+
+suppression_rules:
+  - rule: "within_normal_delay"
+    action: SKIP
+    log: "Contact within normal payment delay prevented"
+  - rule: "payment_plan_active"
+    action: SKIP
+    log: "Contact during active payment plan prevented"
+
+uplift_expectations:
+  sure_thing: 0.02
+  persuadable: 0.40
+  lost_cause: 0.05
+  sleeping_dog: -0.08
+
+cost_model:
+  email_paise: 10
+  payment_link_paise: 150
+  voice_call_paise: 1500
+  human_escalation_paise: 5000

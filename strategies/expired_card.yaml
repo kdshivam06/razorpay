@@ -1,2 +1,79 @@
-# Recovery strategy: expired card
+# Recovery strategy: expired card (§9.3, §9.5)
+# Customer's payment method has expired — needs method update.
+
 name: expired_card
+version: "1.0"
+module: subscription_dunning
+severity: MEDIUM
+
+description: >
+  Card on file has expired. Customer must update payment method.
+  Common in subscription billing. NOT a financial hardship signal —
+  the customer likely intends to continue paying.
+
+root_cause_signals:
+  - error_code: "CARD_EXPIRED"
+  - error_source: "issuer"
+  - error_description_contains: ["expired", "expiry", "invalid card"]
+
+timing:
+  initial_wait_hours: 2
+  max_retry_attempts: 0  # No retry — card is expired, won't work
+  contact_window_start: "08:00"
+  contact_window_end: "21:00"
+
+action_sequence:
+  - step: 1
+    action: SEND_EMAIL
+    condition: "always"
+    template: card_expired_email
+    rationale: "Immediate email with update link — lowest CX friction"
+    cooldown_hours: 72
+
+  - step: 2
+    action: SEND_SMS
+    condition: "hours_since_failure > 48 AND not email_opened"
+    template: card_expired_sms
+    rationale: "SMS follow-up if email not opened"
+    cooldown_hours: 72
+
+  - step: 3
+    action: REQUEST_PAYMENT_METHOD_UPDATE
+    condition: "hours_since_failure > 24"
+    rationale: "Direct payment method update request"
+
+  - step: 4
+    action: SEND_PAYMENT_LINK
+    condition: "hours_since_failure > 96"
+    rationale: "Fallback payment link if method update not completed"
+    link_expiry_hours: 168
+
+  - step: 5
+    action: SEND_WHATSAPP
+    condition: "hours_since_failure > 168 AND whatsapp_consent"
+    template: card_expired_whatsapp
+    rationale: "WhatsApp nudge after 1 week"
+
+stopping_rules:
+  - "payment_method_updated"
+  - "payment_detected"
+  - "subscription_cancelled_by_customer"
+  - "customer_opted_out"
+  - "case_age_days > 30"
+
+suppression_rules:
+  - rule: "method_already_updated"
+    action: CANCEL_ALL
+    log: "Card update after method updated prevented"
+
+uplift_expectations:
+  sure_thing: 0.05
+  persuadable: 0.45
+  lost_cause: 0.08
+  sleeping_dog: 0.0
+
+cost_model:
+  email_paise: 10
+  sms_paise: 25
+  whatsapp_paise: 75
+  payment_link_paise: 150

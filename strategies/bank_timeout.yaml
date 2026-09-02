@@ -1,2 +1,92 @@
-# Recovery strategy: bank timeout
+# Recovery strategy: bank timeout (§9.1)
+# Payment gateway or bank infrastructure timed out.
+
 name: bank_timeout
+version: "1.0"
+module: payment_degradation
+severity: HIGH
+
+description: >
+  Payment failed due to bank or gateway timeout. This is an infrastructure
+  issue, NOT a customer issue. The customer has intent and funds.
+  Recovery should be fast — alternate method or retry once resolved.
+
+root_cause_signals:
+  - error_code: "GATEWAY_TIMEOUT"
+  - error_code: "BANK_TIMEOUT"
+  - error_source: "gateway"
+  - error_description_contains: ["timeout", "timed out", "connection"]
+
+edge_cases:
+  - "Single-bank downtime (not all banks) — only affect that instrument"
+  - "Cascading downtimes — multiple banks failing"
+  - "Flapping downtimes — downtime starts/resolves/starts again"
+  - "Payment fails before downtime webhook arrives — retroactive match"
+
+timing:
+  initial_wait_hours: 0.5  # Fast — infrastructure issue
+  max_retry_attempts: 2
+  retry_backoff: linear
+  backoff_base_hours: 2
+  wait_for_resolution: true
+
+action_sequence:
+  - step: 1
+    action: WAIT
+    condition: "downtime_active AND severity != 'HIGH'"
+    rationale: "Wait for downtime resolution if transient"
+    max_wait_hours: 4
+
+  - step: 2
+    action: RETRY_ALTERNATE_METHOD
+    condition: "downtime_active AND hours_since_failure > 1"
+    rationale: "Offer alternate payment method while bank is down"
+
+  - step: 3
+    action: SEND_PAYMENT_LINK
+    condition: "hours_since_failure > 2"
+    template: payment_failed_sms
+    rationale: "Payment link with all available methods"
+    link_expiry_hours: 24
+
+  - step: 4
+    action: RETRY_SAME_METHOD
+    condition: "downtime_resolved AND hours_since_resolution < 2"
+    rationale: "Retry original method once downtime resolves"
+
+  - step: 5
+    action: SEND_SMS
+    condition: "hours_since_failure > 6"
+    template: payment_failed_sms
+    rationale: "Inform customer about the issue and provide link"
+    cooldown_hours: 24
+
+on_downtime_resolve:
+  - action: RETRY_SAME_METHOD
+    condition: "case_still_open"
+    rationale: "Auto-retry when infrastructure comes back"
+  - action: CANCEL_PENDING_LINKS
+    condition: "payment_recovered"
+    rationale: "Clean up recovery links after successful retry"
+
+stopping_rules:
+  - "payment_detected"
+  - "downtime_resolved AND retry_succeeded"
+  - "case_age_hours > 48"
+  - "customer_opted_out"
+
+suppression_rules:
+  - rule: "retry_during_active_downtime_same_bank"
+    action: SKIP
+    log: "Retry against failed bank prevented"
+
+uplift_expectations:
+  sure_thing: 0.05
+  persuadable: 0.55
+  lost_cause: 0.10
+  sleeping_dog: 0.0
+
+cost_model:
+  retry_paise: 200
+  payment_link_paise: 150
+  sms_paise: 25

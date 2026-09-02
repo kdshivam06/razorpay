@@ -1,2 +1,79 @@
-# Recovery strategy: dispute
+# Recovery strategy: dispute (§2.3, §2.4)
+# Customer has filed a dispute/chargeback — ALL recovery STOPS.
+
 name: dispute
+version: "1.0"
+module: null  # No recovery module — disputes halt everything
+severity: CRITICAL
+
+description: >
+  Customer has filed a dispute or chargeback. ALL outbound actions
+  MUST STOP IMMEDIATELY. Any contact during an active dispute is a
+  compliance violation. The case enters DISPUTED state and remains
+  there until dispute resolution.
+
+root_cause_signals:
+  - event: "payment.dispute.created"
+  - event: "chargeback.created"
+  - condition: "dispute_score > 0.8"
+
+# HARD STOP — no recovery actions during dispute
+compliance:
+  rule: IMMEDIATE_HALT
+  rationale: >
+    Outbound contact during active dispute is a compliance violation.
+    Recovery case enters DISPUTED state. No SMS, no email, no call,
+    no payment link, no retry. Wait for dispute resolution.
+
+  allowed_actions: ["NO_ACTION"]
+  blocked_actions: ["ALL"]
+
+timing:
+  # No timing — no actions allowed
+  initial_wait_hours: null
+  max_retry_attempts: 0
+
+action_sequence:
+  - step: 1
+    action: NO_ACTION
+    condition: "always"
+    rationale: "Dispute active — ALL recovery actions halted"
+
+  - step: 2
+    action: CANCEL_ALL_PENDING
+    condition: "has_pending_actions"
+    rationale: "Cancel any queued SMS/links/retries"
+
+on_dispute_resolved:
+  won_by_merchant:
+    action: RESUME_RECOVERY
+    rationale: "Dispute resolved in merchant's favor — resume recovery"
+  won_by_customer:
+    action: CLOSE_CASE
+    rationale: "Dispute resolved in customer's favor — write off"
+
+stopping_rules:
+  - "dispute_filed"  # This IS the stopping rule
+  - "case_already_disputed"
+
+suppression_rules:
+  - rule: "any_outbound_during_dispute"
+    action: PERMANENT_BLOCK
+    log: "Recovery after dispute prevented"
+  - rule: "retry_during_dispute"
+    action: PERMANENT_BLOCK
+    log: "Retry during active dispute prevented"
+  - rule: "payment_link_during_dispute"
+    action: CANCEL
+    log: "Payment link during dispute prevented"
+
+uplift_expectations:
+  # All zero — no intervention during dispute
+  sure_thing: 0.0
+  persuadable: 0.0
+  lost_cause: 0.0
+  sleeping_dog: 0.0
+
+cost_model:
+  # No costs — no actions taken
+  all: 0

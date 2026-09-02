@@ -1,2 +1,83 @@
-# Recovery strategy: insufficient funds
+# Recovery strategy: insufficient funds (§9.1, §9.5)
+# Customer's bank account lacks funds — most common payment failure.
+
 name: insufficient_funds
+version: "1.0"
+module: mandate_retry
+severity: MEDIUM
+
+description: >
+  Customer attempted payment but bank returned insufficient funds.
+  Most common reason for payment failures. Often resolves naturally
+  around salary dates.
+
+root_cause_signals:
+  - error_code: "INSUFFICIENT_FUNDS"
+  - error_source: "bank"
+  - error_description_contains: ["insufficient", "balance", "funds"]
+
+timing:
+  # Dynamic timing — salary-day heuristic (§9.5)
+  initial_wait_hours: 24
+  salary_day_heuristic: true
+  preferred_days: [1, 5, 10, 15, 25]  # Typical salary dates
+  max_retry_attempts: 3
+  retry_backoff: exponential
+  backoff_base_hours: 24
+
+action_sequence:
+  - step: 1
+    action: WAIT
+    condition: "natural_pay_probability > 0.7"
+    rationale: "High natural payment probability — wait for salary day"
+    max_wait_hours: 72
+
+  - step: 2
+    action: SEND_SMS
+    condition: "hours_since_failure > 24"
+    template: payment_failed_sms
+    rationale: "Gentle reminder after 24h"
+    cooldown_hours: 48
+
+  - step: 3
+    action: SEND_PAYMENT_LINK
+    condition: "hours_since_failure > 72 AND natural_pay_probability < 0.5"
+    rationale: "Payment link with alternate method after 3 days"
+    link_expiry_hours: 72
+
+  - step: 4
+    action: RETRY_SAME_METHOD
+    condition: "is_salary_day AND hours_since_failure > 48"
+    rationale: "Retry on detected salary day"
+
+  - step: 5
+    action: HUMAN_ESCALATION
+    condition: "retry_count >= 3 AND remaining_amount > 500000"
+    rationale: "High-value case with exhausted retries"
+
+stopping_rules:
+  - "payment_detected"
+  - "customer_opted_out"
+  - "dispute_filed"
+  - "retry_count >= max_retry_attempts"
+  - "case_age_days > 30"
+
+suppression_rules:
+  - rule: "already_paid"
+    action: CANCEL_ALL
+    log: "Retry after payment prevented"
+  - rule: "duplicate_in_cooldown"
+    action: SKIP
+    log: "Duplicate SMS prevented"
+
+uplift_expectations:
+  sure_thing: 0.02
+  persuadable: 0.35
+  lost_cause: 0.05
+  sleeping_dog: -0.10
+
+cost_model:
+  sms_paise: 25
+  payment_link_paise: 150
+  retry_paise: 200
+  human_escalation_paise: 5000
