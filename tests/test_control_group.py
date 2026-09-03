@@ -57,7 +57,9 @@ def test_experiment_engine_records_metrics_and_stops_on_guardrail() -> None:
     assert engine.should_stop("exp_001") is True
 
 
-def test_counterfactual_simulator_labels_synthetic_and_selects_best_net_strategy() -> None:
+def test_counterfactual_simulator_labels_synthetic_and_selects_best_net_strategy() -> (
+    None
+):
     cases = [
         {
             "case_id": "case_001",
@@ -99,11 +101,19 @@ def test_counterfactual_simulator_labels_synthetic_and_selects_best_net_strategy
 
     assert comparison.best_strategy == "AI Optimized Recovery"
     assert comparison.strategies["AI Optimized Recovery"]["synthetic"] is True
-    assert comparison.strategies["AI Optimized Recovery"]["incremental_recovered_paise"] > 0
-    assert comparison.strategies["Human Only"]["cost_paise"] > comparison.strategies["Fixed Rules"]["cost_paise"]
+    assert (
+        comparison.strategies["AI Optimized Recovery"]["incremental_recovered_paise"]
+        > 0
+    )
+    assert (
+        comparison.strategies["Human Only"]["cost_paise"]
+        > comparison.strategies["Fixed Rules"]["cost_paise"]
+    )
 
 
-def test_model_evaluator_reports_classification_probability_and_uplift_metrics() -> None:
+def test_model_evaluator_reports_classification_probability_and_uplift_metrics() -> (
+    None
+):
     evaluator = ModelEvaluator()
 
     classification = evaluator.classification(
