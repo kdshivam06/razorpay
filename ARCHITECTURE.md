@@ -2,7 +2,11 @@
 
 The authoritative design lives in `docs/implementation_plan.md` §2. This page
 reproduces the definitive architecture diagram and explains the non-negotiable
-**three-layer separation** that every module must respect.
+**three-layer separation** that every module must respect, then maps each layer
+to the implemented components and the runtime pipeline.
+
+> Companion docs: [`README.md`](README.md) for setup/run, [`INTERFACES.md`](INTERFACES.md)
+> for the frozen cross-track contracts.
 
 ## §2.1 Definitive Architecture Diagram
 
@@ -152,3 +156,51 @@ auditable, and demo-ready.
 
 The exact signatures these layers must satisfy are frozen in
 [`INTERFACES.md`](INTERFACES.md).
+
+## Implemented components per layer
+
+Every layer below is fully implemented (no `NotImplementedError` remains),
+with the AI Loop (`§1.3`) driven by `app/modules/base_module.py`.
+
+| Layer | In `app/` | Key components |
+|---|---|---|
+| **Event Gateway** | `ingestion/` | `webhook_validator` (HMAC + rotation, replay), `event_inbox` (dedup), `webhook_handler`, `dead_letter_queue`, `batch_loader` |
+| **State** | `core/` | `Obligation` ledger (double-dip prevention, recovery lock), `RecoveryCase` + 18-state FSM, `dependency_health` |
+| **AI/ML (Propose)** | `classifier/`, `revenue_risk/`, `optimizer/`, `nlp/`, `modules/` | hybrid classifier, propensity + uplift models, intervention optimizer (economics, fatigue, budget, multi-obligation), intent/PTP/NLP safety, recovery modules |
+| **Policy (Gate)** | `policy/` | `PolicyEngine` master gate + consent, contact window, preferences, cooldown (Redis), fraud, dispute, reversibility, blast radius, fatigue, platform awareness, `simulation_mode` |
+| **Executor (Perform)** | `executor/`, `reconciliation/` | `ActionExecutor`, `idempotency`, `circuit_breaker`, `transactional_outbox`, `payment_link` lifecycle, `human_queue`, `PreActionReconciler`, `OutOfOrderGuard`, `UnknownStateHandler` |
+| **Outcome / Measure** | `reconciliation/`, `measurement/` | reconciliation engine, control group, experiment engine, counterfactual simulator |
+| **Audit / Health** | `audit/`, `health/` | `AuditLogger` (hash chain), `PreventionLog`, `DecisionTracer`, `AgentMonitor` |
+| **Dashboard / Demo** | `dashboard/` | `api` (waterfall, scorecard, segments, contacts, queue), `red_team_api` (Attack-the-Agent demo), `static/*` (HTML + Chart.js) |
+
+## Runtime pipeline (one case)
+
+```
+POST /webhooks  (or batch load)
+      │  HMAC-verify → freshness → dedup (EventInbox) → DLQ on failure
+      ▼
+BaseRecoveryModule.run(case)                    app/modules/base_module.py
+  OBSERVE → RECONSTRUCT (Obligation ledger)
+  DIAGNOSE  → root-cause classification
+  PREDICT   → natural payment probability
+  GENERATE CANDIDATES → ranked economic candidates
+  OPTIMIZE  → sort by economic score
+  POLICY    → PolicyEngine: first APPROVED candidate wins
+  PRE-ACTION RECONCILE → re-check ledger before any outbound
+  EXECUTE   → ActionExecutor (idempotency key, circuit breaker, outbox)
+  LEARN     → DecisionTracer trace + AuditLogger hash-chained entry
+      │
+      ▼
+Dashboard read-only projection (app/dashboard/api.py)
+  waterfall + scorecard from DecisionTracer / AuditLogger / PreventionLog
+```
+
+## Fail-closed safety properties (§2.4)
+
+- **Redis down → outbound contact refused** (`DependencyHealth.fail_closed_reason("contact")`).
+- **DB cannot guarantee state → irreversible financial action blocked**
+  (`DependencyHealth.fail_closed_reason("financial")`).
+- **Circuit breaker opens after N failures** — degraded dependency stops being
+  called and work falls to the human queue.
+- **Duplicate runs dedup** by idempotency key; **UNKNOWN never blindly retried**
+  — the `UnknownStateHandler` routes to reconciliation instead.
