@@ -3,58 +3,160 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>RecoveryOS — Recovery Waterfall Dashboard</title>
+  <title>RecoveryOS - Recovery Command Center</title>
   <link rel="stylesheet" href="dashboard.css" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script defer src="dashboard.js"></script>
 </head>
 <body>
   <header class="topbar">
-    <h1>RecoveryOS</h1>
-    <span class="tagline">AI Revenue Recovery Optimizer</span>
-    <nav>
-      <a href="index.html" class="active">Waterfall</a>
-      <a href="red_team.html">Attack the Agent</a>
+    <a class="brand" href="index.html" aria-label="RecoveryOS dashboard">
+      <span class="brand-mark">R</span>
+      <span>
+        <strong>RecoveryOS</strong>
+        <small>Revenue recovery command center</small>
+      </span>
+    </a>
+    <nav class="main-nav" aria-label="Primary">
+      <a href="index.html" class="active"><i data-lucide="bar-chart-3"></i>Waterfall</a>
+      <a href="red_team.html"><i data-lucide="shield-alert"></i>Attack Lab</a>
     </nav>
+    <div class="top-actions">
+      <span class="status-pill" id="apiStatus"><span></span>Syncing</span>
+      <button class="icon-button" id="refreshButton" type="button" aria-label="Refresh dashboard" title="Refresh dashboard">
+        <i data-lucide="refresh-cw"></i>
+      </button>
+    </div>
   </header>
 
   <main>
-    <section class="pitch" id="pitchLine">Loading recon…</section>
-
-    <section class="panel">
-      <h2>Recovery Waterfall</h2>
-      <div class="chart-wrap"><canvas id="waterfallChart"></canvas></div>
-      <div class="kpis" id="waterfallKpis"></div>
+    <section class="hero-panel">
+      <div class="hero-copy">
+        <p class="eyebrow">Live recovery operations</p>
+        <h1>Recover the right revenue, with the fewest wrong touches.</h1>
+        <p id="pitchLine">Syncing the recovery waterfall, treatment lift, exposure savings, and human-review queue.</p>
+        <div class="mode-switch" aria-label="Dashboard focus">
+          <button type="button" class="active" data-mode="executive"><i data-lucide="activity"></i>Overview</button>
+          <button type="button" data-mode="experiments"><i data-lucide="flask-conical"></i>Experiment</button>
+          <button type="button" data-mode="guardrails"><i data-lucide="shield-check"></i>Guardrails</button>
+        </div>
+      </div>
+      <div class="decision-map" aria-label="Recovery decision flow">
+        <div class="map-line line-a"></div>
+        <div class="map-line line-b"></div>
+        <div class="map-line line-c"></div>
+        <div class="map-node node-risk">
+          <i data-lucide="radar"></i>
+          <span>Risk</span>
+          <strong>At stake</strong>
+        </div>
+        <div class="map-node node-model">
+          <i data-lucide="brain-circuit"></i>
+          <span>Model</span>
+          <strong>Uplift</strong>
+        </div>
+        <div class="map-node node-policy">
+          <i data-lucide="scale"></i>
+          <span>Policy</span>
+          <strong>Allowed</strong>
+        </div>
+        <div class="map-node node-action">
+          <i data-lucide="send"></i>
+          <span>Action</span>
+          <strong>Queued</strong>
+        </div>
+      </div>
     </section>
 
-    <section class="panel">
-      <h2>Agent Scorecard</h2>
-      <div class="scorecard" id="scorecard"></div>
-      <div class="kpis" id="scorecardKpis"></div>
+    <section class="metric-strip" id="topMetrics" aria-label="Key recovery metrics"></section>
+
+    <section class="workspace-grid">
+      <article class="surface surface-large" data-panel="executive experiments">
+        <div class="surface-header">
+          <div>
+            <p class="eyebrow">Incrementality</p>
+            <h2>Recovery Waterfall</h2>
+          </div>
+          <span class="quiet" id="lastUpdated">Waiting for data</span>
+        </div>
+        <div class="chart-wrap waterfall-wrap"><canvas id="waterfallChart"></canvas></div>
+        <div class="kpis" id="waterfallKpis"></div>
+      </article>
+
+      <aside class="surface decision-panel" data-panel="executive guardrails">
+        <div class="surface-header">
+          <div>
+            <p class="eyebrow">Decision posture</p>
+            <h2>Agent Scorecard</h2>
+          </div>
+          <i data-lucide="shield"></i>
+        </div>
+        <div class="scorecard" id="scorecard"></div>
+        <div class="breakdown" id="scorecardKpis"></div>
+      </aside>
     </section>
 
-    <section class="grid">
-      <div class="panel">
-        <h2>Lift by Uplift Segment</h2>
+    <section class="analytics-grid">
+      <article class="surface" data-panel="executive experiments">
+        <div class="surface-header">
+          <div>
+            <p class="eyebrow">Treatment targeting</p>
+            <h2>Lift by Uplift Segment</h2>
+          </div>
+          <div class="segmented" id="segmentControls" aria-label="Select uplift segment"></div>
+        </div>
         <div class="chart-wrap"><canvas id="segmentChart"></canvas></div>
-      </div>
-      <div class="panel">
-        <h2>Contacts Avoided</h2>
+        <div class="segment-readout" id="segmentReadout"></div>
+      </article>
+
+      <article class="surface" data-panel="executive guardrails">
+        <div class="surface-header">
+          <div>
+            <p class="eyebrow">Contact discipline</p>
+            <h2>Contacts Avoided</h2>
+          </div>
+          <i data-lucide="message-circle-off"></i>
+        </div>
         <div class="chart-wrap"><canvas id="contactsChart"></canvas></div>
-        <div class="kpis" id="contactsKpis"></div>
-      </div>
+        <div class="kpis compact" id="contactsKpis"></div>
+      </article>
     </section>
 
-    <section class="panel">
-      <h2>Exception Queue (Human Review)</h2>
-      <table id="exceptionTable">
-        <thead>
-          <tr><th>Case</th><th>Priority</th><th>Action</th><th>Reason</th></tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+    <section class="surface queue-surface" data-panel="guardrails executive">
+      <div class="surface-header">
+        <div>
+          <p class="eyebrow">Human review</p>
+          <h2>Exception Queue</h2>
+        </div>
+        <div class="segmented" id="queueFilters" aria-label="Filter queue">
+          <button type="button" class="active" data-priority="all">All</button>
+          <button type="button" data-priority="p0">P0</button>
+          <button type="button" data-priority="p1">P1</button>
+          <button type="button" data-priority="p2">P2</button>
+        </div>
+      </div>
+      <div class="queue-layout">
+        <div class="table-wrap">
+          <table id="exceptionTable">
+            <thead>
+              <tr>
+                <th>Case</th>
+                <th>Priority</th>
+                <th>Action</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <aside class="case-inspector" id="caseInspector">
+          <span class="mini-label">Selected case</span>
+          <strong>No case selected</strong>
+          <p>Human-review context appears here when the queue has active work.</p>
+        </aside>
+      </div>
     </section>
   </main>
-
-  <script src="dashboard.js"></script>
 </body>
 </html>

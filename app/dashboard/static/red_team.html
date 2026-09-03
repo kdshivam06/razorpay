@@ -3,94 +3,91 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>RecoveryOS — Attack the Agent</title>
+  <title>RecoveryOS - Attack Lab</title>
   <link rel="stylesheet" href="dashboard.css" />
+  <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script defer src="red_team.js"></script>
 </head>
 <body>
   <header class="topbar">
-    <h1>RecoveryOS</h1>
-    <span class="tagline">Attack the Agent (§16.1)</span>
-    <nav>
-      <a href="index.html">Waterfall</a>
-      <a href="red_team.html" class="active">Attack the Agent</a>
+    <a class="brand" href="index.html" aria-label="RecoveryOS dashboard">
+      <span class="brand-mark">R</span>
+      <span>
+        <strong>RecoveryOS</strong>
+        <small>Guardrail attack lab</small>
+      </span>
+    </a>
+    <nav class="main-nav" aria-label="Primary">
+      <a href="index.html"><i data-lucide="bar-chart-3"></i>Waterfall</a>
+      <a href="red_team.html" class="active"><i data-lucide="shield-alert"></i>Attack Lab</a>
     </nav>
+    <div class="top-actions">
+      <span class="status-pill" id="apiStatus"><span></span>Ready</span>
+    </div>
   </header>
 
   <main>
-    <section class="pitch">
-      Press an attack. RecoveryOS runs it through the <em>same</em> guardrails
-      as production and shows whether the agent detected it and blocked it.
+    <section class="hero-panel">
+      <div class="hero-copy">
+        <p class="eyebrow">Red-team demo</p>
+        <h1>Attack the agent. Watch the guardrails answer.</h1>
+        <p>Each scenario runs through the same safety path: malicious input, detector verdict, policy block, and reviewer-ready reason.</p>
+      </div>
+      <div class="decision-map" aria-label="Red-team flow">
+        <div class="map-line line-a"></div>
+        <div class="map-line line-b"></div>
+        <div class="map-line line-c"></div>
+        <div class="map-node node-risk">
+          <i data-lucide="bug"></i>
+          <span>Attack</span>
+          <strong>Input</strong>
+        </div>
+        <div class="map-node node-model">
+          <i data-lucide="scan-search"></i>
+          <span>Detect</span>
+          <strong>Signal</strong>
+        </div>
+        <div class="map-node node-policy">
+          <i data-lucide="ban"></i>
+          <span>Block</span>
+          <strong>Policy</strong>
+        </div>
+        <div class="map-node node-action">
+          <i data-lucide="file-check-2"></i>
+          <span>Audit</span>
+          <strong>Reason</strong>
+        </div>
+      </div>
     </section>
 
-    <section class="panel">
-      <h2>Select an attack</h2>
-      <div class="attacks" id="attackButtons"></div>
-      <div id="result"></div>
+    <section class="attack-lab">
+      <article class="surface">
+        <div class="surface-header">
+          <div>
+            <p class="eyebrow">Scenarios</p>
+            <h2>Attack Catalog</h2>
+          </div>
+          <i data-lucide="crosshair"></i>
+        </div>
+        <div class="attacks" id="attackButtons"></div>
+      </article>
+
+      <article class="surface">
+        <div class="surface-header">
+          <div>
+            <p class="eyebrow">Verdict</p>
+            <h2>Guardrail Trace</h2>
+          </div>
+          <i data-lucide="route"></i>
+        </div>
+        <div id="result" class="result empty">
+          <div>
+            <i data-lucide="shield-question"></i>
+            <p>Awaiting guardrail trace.</p>
+          </div>
+        </div>
+      </article>
     </section>
   </main>
-
-  <script>
-    const API = "";
-
-    async function getJSON(path) {
-      const res = await fetch(API + path);
-      if (!res.ok) throw new Error(res.status);
-      return res.json();
-    }
-
-    async function triggerAttack(name, btn) {
-      btn.disabled = true;
-      btn.textContent = "Running…";
-      document.getElementById("result").innerHTML = "";
-      try {
-        const r = await fetch(`${API}/api/red-team/attack/${encodeURIComponent(name)}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: "{}",
-        });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.detail || r.status);
-        renderResult(data);
-      } catch (err) {
-        document.getElementById("result").innerHTML =
-          `<div class="result"><h3>Error</h3><div>${err.message}</div></div>`;
-      } finally {
-        btn.disabled = false;
-        btn.textContent = name.split("_").join(" ");
-      }
-    }
-
-    function renderResult(data) {
-      const flow = `
-        <div class="flow">
-          <span class="step attack">ATTACK</span>
-          <span>→</span>
-          <span class="step detected">${data.detected ? "DETECTED" : "NOT DETECTED"}</span>
-          <span>→</span>
-          <span class="step blocked">${data.blocked ? "BLOCKED" : "NOT BLOCKED"}</span>
-        </div>
-        <div class="reason">${data.reason || ""}</div>`;
-      document.getElementById("result").innerHTML =
-        `<div class="result"><h3>${data.attack}</h3>${flow}</div>`;
-    }
-
-    async function loadAttacks() {
-      try {
-        const attacks = await getJSON("/api/red-team/attacks");
-        const container = document.getElementById("attackButtons");
-        container.innerHTML = attacks
-          .map(
-            (a) =>
-              `<button class="attack" data-attack="${a}" onclick="triggerAttack('${a}', this)">${a.split("_").join(" ")}</button>`
-          )
-          .join("");
-      } catch (err) {
-        document.getElementById("attackButtons").innerHTML =
-          `<div class="kpi"><div class="label">Could not reach red-team API</div><div class="value">${err.message}</div></div>`;
-      }
-    }
-
-    document.addEventListener("DOMContentLoaded", loadAttacks);
-  </script>
 </body>
 </html>
