@@ -1,4 +1,4 @@
-"""Test suite: dashboard router + static frontend wiring (Track D step 3)."""
+"""Test suite: app wiring — routers, static assets, /health endpoint (Track D steps 3–4)."""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -90,3 +90,17 @@ def test_red_team_attacks_listed():
     resp = client.get("/api/red-team/attacks")
     assert resp.status_code == 200
     assert "invalid_signature" in resp.json()
+
+
+def test_health_endpoint_returns_liveness_and_checks():
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] in {"healthy", "degraded"}
+    assert body["version"] == app.version
+    assert body["uptime_seconds"] >= 0
+    assert "postgres" in body["checks"]
+    assert "redis" in body["checks"]
+    for check in body["checks"].values():
+        assert isinstance(check["ok"], bool)
+        assert isinstance(check["detail"], str)
