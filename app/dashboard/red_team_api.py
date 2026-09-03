@@ -458,6 +458,12 @@ router = APIRouter(tags=["red_team"])
 _red_team: RedTeamApi | None = None
 
 
+def configure(api: RedTeamApi) -> None:
+    """Bind the red-team API to shared defensive components (D.2)."""
+    global _red_team
+    _red_team = api
+
+
 def _get_api() -> RedTeamApi:
     global _red_team
     if _red_team is None:

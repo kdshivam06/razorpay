@@ -1,2 +1,60 @@
 <!DOCTYPE html>
-<html><head><title>RecoveryOS Dashboard</title></head><body><!-- Recovery waterfall dashboard --></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RecoveryOS — Recovery Waterfall Dashboard</title>
+  <link rel="stylesheet" href="dashboard.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <h1>RecoveryOS</h1>
+    <span class="tagline">AI Revenue Recovery Optimizer</span>
+    <nav>
+      <a href="index.html" class="active">Waterfall</a>
+      <a href="red_team.html">Attack the Agent</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="pitch" id="pitchLine">Loading recon…</section>
+
+    <section class="panel">
+      <h2>Recovery Waterfall</h2>
+      <div class="chart-wrap"><canvas id="waterfallChart"></canvas></div>
+      <div class="kpis" id="waterfallKpis"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Agent Scorecard</h2>
+      <div class="scorecard" id="scorecard"></div>
+      <div class="kpis" id="scorecardKpis"></div>
+    </section>
+
+    <section class="grid">
+      <div class="panel">
+        <h2>Lift by Uplift Segment</h2>
+        <div class="chart-wrap"><canvas id="segmentChart"></canvas></div>
+      </div>
+      <div class="panel">
+        <h2>Contacts Avoided</h2>
+        <div class="chart-wrap"><canvas id="contactsChart"></canvas></div>
+        <div class="kpis" id="contactsKpis"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Exception Queue (Human Review)</h2>
+      <table id="exceptionTable">
+        <thead>
+          <tr><th>Case</th><th>Priority</th><th>Action</th><th>Reason</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>

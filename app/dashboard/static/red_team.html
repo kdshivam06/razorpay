@@ -1,2 +1,96 @@
 <!DOCTYPE html>
-<html><head><title>Attack the Agent</title></head><body><!-- Red-team demo --></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RecoveryOS — Attack the Agent</title>
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>RecoveryOS</h1>
+    <span class="tagline">Attack the Agent (§16.1)</span>
+    <nav>
+      <a href="index.html">Waterfall</a>
+      <a href="red_team.html" class="active">Attack the Agent</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="pitch">
+      Press an attack. RecoveryOS runs it through the <em>same</em> guardrails
+      as production and shows whether the agent detected it and blocked it.
+    </section>
+
+    <section class="panel">
+      <h2>Select an attack</h2>
+      <div class="attacks" id="attackButtons"></div>
+      <div id="result"></div>
+    </section>
+  </main>
+
+  <script>
+    const API = "";
+
+    async function getJSON(path) {
+      const res = await fetch(API + path);
+      if (!res.ok) throw new Error(res.status);
+      return res.json();
+    }
+
+    async function triggerAttack(name, btn) {
+      btn.disabled = true;
+      btn.textContent = "Running…";
+      document.getElementById("result").innerHTML = "";
+      try {
+        const r = await fetch(`${API}/api/red-team/attack/${encodeURIComponent(name)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || r.status);
+        renderResult(data);
+      } catch (err) {
+        document.getElementById("result").innerHTML =
+          `<div class="result"><h3>Error</h3><div>${err.message}</div></div>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = name.split("_").join(" ");
+      }
+    }
+
+    function renderResult(data) {
+      const flow = `
+        <div class="flow">
+          <span class="step attack">ATTACK</span>
+          <span>→</span>
+          <span class="step detected">${data.detected ? "DETECTED" : "NOT DETECTED"}</span>
+          <span>→</span>
+          <span class="step blocked">${data.blocked ? "BLOCKED" : "NOT BLOCKED"}</span>
+        </div>
+        <div class="reason">${data.reason || ""}</div>`;
+      document.getElementById("result").innerHTML =
+        `<div class="result"><h3>${data.attack}</h3>${flow}</div>`;
+    }
+
+    async function loadAttacks() {
+      try {
+        const attacks = await getJSON("/api/red-team/attacks");
+        const container = document.getElementById("attackButtons");
+        container.innerHTML = attacks
+          .map(
+            (a) =>
+              `<button class="attack" data-attack="${a}" onclick="triggerAttack('${a}', this)">${a.split("_").join(" ")}</button>`
+          )
+          .join("");
+      } catch (err) {
+        document.getElementById("attackButtons").innerHTML =
+          `<div class="kpi"><div class="label">Could not reach red-team API</div><div class="value">${err.message}</div></div>`;
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", loadAttacks);
+  </script>
+</body>
+</html>

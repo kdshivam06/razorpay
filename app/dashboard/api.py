@@ -413,3 +413,93 @@ class DashboardApi:
     def decision_traces(self, case_id: str) -> list[DecisionTrace]:
         """All decision traces for a case."""
         return self._tracer.traces_for_case(case_id)
+
+
+# ── FastAPI router (serves the §14 panels) ───────────────────────────────────
+
+from fastapi import APIRouter
+
+router = APIRouter(tags=["dashboard"])
+
+_dashboard: DashboardApi | None = None
+
+
+def configure(api: DashboardApi) -> None:
+    """Bind the dashboard API to the SAME populated components the recovery
+    run used, so the served panels reflect what actually happened (§14)."""
+    global _dashboard
+    _dashboard = api
+
+
+def _get_dashboard() -> DashboardApi:
+    global _dashboard
+    if _dashboard is None:
+        _dashboard = DashboardApi()
+    return _dashboard
+
+
+def _wf(d: object) -> dict:  # noqa: D401 - projection helper
+    return {
+        "revenue_at_risk_paise": d.revenue_at_risk_paise,
+        "expected_natural_recovery_paise": d.expected_natural_recovery_paise,
+        "gross_recovery_opportunity_paise": d.gross_recovery_opportunity_paise,
+        "incremental_recovery_paise": d.incremental_recovery_paise,
+        "communication_cost_paise": d.communication_cost_paise,
+        "incremental_net_recovery_paise": d.incremental_net_recovery_paise,
+    }
+
+
+@router.get("/api/dashboard/waterfall")
+def get_waterfall() -> dict:
+    return _wf(_get_dashboard().waterfall())
+
+
+@router.get("/api/dashboard/scorecard")
+def get_scorecard() -> dict:
+    api = _get_dashboard()
+    data = api.scorecard()
+    data["lift"] = {
+        "treatment_payment_rate": api.control_vs_treatment_lift().treatment_payment_rate,
+        "control_payment_rate": api.control_vs_treatment_lift().control_payment_rate,
+        "lift_pp": api.control_vs_treatment_lift().lift_pp,
+        "treatment_cases": api.control_vs_treatment_lift().treatment_cases,
+        "control_cases": api.control_vs_treatment_lift().control_cases,
+    }
+    return data
+
+
+@router.get("/api/dashboard/uplift_segments")
+def get_uplift_segments() -> list[dict]:
+    return [
+        {
+            "segment": b.segment,
+            "case_count": b.case_count,
+            "revenue_at_risk_paise": b.revenue_at_risk_paise,
+            "incremental_recovery_paise": b.incremental_recovery_paise,
+        }
+        for b in _get_dashboard().uplift_segments()
+    ]
+
+
+@router.get("/api/dashboard/contacts_avoided")
+def get_contacts_avoided() -> dict:
+    ca = _get_dashboard().contacts_avoided()
+    return {
+        "total": ca.total,
+        "by_reason": ca.by_reason,
+        "money_prevented_paise": ca.money_prevented_paise,
+    }
+
+
+@router.get("/api/dashboard/exception_queue")
+def get_exception_queue() -> list[dict]:
+    return [
+        {
+            "case_id": i.case_id,
+            "reason": i.reason,
+            "priority": i.priority,
+            "action": i.action,
+            "amount_paise": i.amount_paise,
+        }
+        for i in _get_dashboard().exception_queue()
+    ]

@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, Request, status
+from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.db.session import get_db  # noqa: F401  (exposes the session dependency)
+from app.dashboard.api import router as dashboard_router
+from app.dashboard.red_team_api import router as red_team_router
 from app.ingestion.webhook_handler import WebhookHandler, WebhookResultStatus
 
 settings = get_settings()
@@ -77,6 +81,21 @@ async def receive_webhook(
 #   from app.dashboard.api import router                   # TODO include: dashboard
 #   from app.dashboard.red_team_api import router          # TODO include: red_team
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Dashboard & red-team routers (Track D) — serve the §14 panels and §16.1 demo.
+# ---------------------------------------------------------------------------
+
+app.include_router(dashboard_router)
+app.include_router(red_team_router)
+
+_static_dir = Path(__file__).resolve().parent / "dashboard" / "static"
+app.mount(
+    "/static",
+    StaticFiles(directory=str(_static_dir)),
+    name="static",
+)
 
 
 @app.get("/", tags=["meta"])
