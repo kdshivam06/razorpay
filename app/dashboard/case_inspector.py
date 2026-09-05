@@ -2,8 +2,9 @@
 
 Returns the full structured decision packet for a single case, assembled from
 real data already in DB/audit/policy modules (Tracks A-C). Fields without
-upstream sources yet (diagnosis rationale, channel_drafts, structured
-policy_gates — coming in E.3, E.4, E.6) return null with a pending marker.
+upstream sources yet (diagnosis rationale, structured policy_gates) return
+null with a pending marker (E.3, E.6 done). Channel drafts are generated
+per case by the §10.7 template engine with LLM hallucination guardrails (E.6).
 """
 
 from __future__ import annotations
@@ -11,18 +12,22 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
-from app.audit.decision_trace import DecisionTrace, DecisionTracer
 from app.audit.audit_logger import AuditLogger
+from app.audit.decision_trace import DecisionTrace, DecisionTracer
 from app.audit.prevention_log import PreventionLog
-from app.contracts import Action, CandidateAction, RiskAssessment
-from app.core.recovery_case import RecoveryCase, UpliftSegment
+from app.contracts import ExecutionState
 from app.dashboard.render_guard import guard_response
-from app.revenue_risk.exposure_engine import ExposureEngine
+from app.executor.notification import NotificationRecord
+from app.nlp.message_templates import (
+    CHANNELS,
+    REGISTERS,
+    ChannelDraftGenerator,
+    TemplateEngine,
+    build_draft_context,
+)
 from app.optimizer.intervention_optimizer import InterventionOptimizer
-from app.optimizer.recovery_economics import RecoveryEconomics
-from app.policy.policy_engine import PolicyEngine, PolicyEvaluation
-from app.revenue_risk.uplift_model import UpliftEstimates
-from app.nlp.message_templates import TemplateEngine
+from app.policy.policy_engine import PolicyEngine
+from app.revenue_risk.exposure_engine import ExposureEngine
 
 
 @dataclasses.dataclass(frozen=True)
@@ -73,11 +78,16 @@ class SettlementProjection:
 
 @dataclasses.dataclass(frozen=True)
 class ChannelDrafts:
-    """Pre-rendered channel message drafts (§10.7)."""
-    sms: str | None
-    whatsapp: str | None
-    email: dict[str, str] | None  # {subject, body}
-    voice_script: str | None
+    """Pre-rendered channel message drafts (§10.7, E.6).
+
+    Each channel maps register → content. Register values are "en"
+    (Standard English) or "hi-en" (Hinglish).
+    """
+
+    sms: dict[str, str] | None  # register → body
+    whatsapp: dict[str, str] | None  # register → body
+    email: dict[str, dict[str, str]] | None  # register → {subject, body}
+    voice_script: dict[str, str] | None  # register → body
 
 
 @dataclasses.dataclass(frozen=True)
@@ -109,6 +119,8 @@ class CaseInspector:
         optimizer: InterventionOptimizer | None = None,
         policy_engine: PolicyEngine | None = None,
         template_engine: TemplateEngine | None = None,
+        draft_generator: ChannelDraftGenerator | None = None,
+        outbox: list[object] | None = None,
     ) -> None:
         self._tracer = tracer or DecisionTracer()
         self._audit = audit or AuditLogger()
@@ -117,6 +129,8 @@ class CaseInspector:
         self._optimizer = optimizer or InterventionOptimizer()
         self._policy = policy_engine or PolicyEngine()
         self._templates = template_engine or TemplateEngine()
+        self._drafts = draft_generator or ChannelDraftGenerator()
+        self._outbox = outbox if outbox is not None else []
 
     def build_packet(self, case_id: str) -> DecisionPacket | None:
         """Build the full decision packet for a case."""
@@ -328,20 +342,62 @@ class CaseInspector:
         )
 
     def _build_channel_drafts(self, trace: DecisionTrace) -> ChannelDrafts:
-        """Build channel drafts for the selected action.
-        
-        Note: Full channel_drafts with templates come in E.4.
-        For now, return null with pending markers.
+        """Build validated SMS/WhatsApp/Email/Voice drafts for the case (§10.7).
+
+        Drafts are generated per register (Standard English / Hinglish) from
+        backend-truth variables; any LLM hallucinated amount or date is
+        rejected inside the generator (§2.3, §10.7).
         """
-        # E.4 will populate these from the template engine
-        # with the selected action's template variables
-        
-        return ChannelDrafts(
-            sms=None,
-            whatsapp=None,
-            email=None,
-            voice_script=None,
+        context = build_draft_context(
+            case_id=trace.case_id,
+            amount_paise=trace.revenue_at_risk_paise,
+            trigger_dt=trace.trigger_timestamp,
+            root_cause=trace.root_cause,
         )
+        drafts = self._drafts.generate(context)
+        return ChannelDrafts(
+            sms={register: drafts["sms"][register].body for register in REGISTERS},
+            whatsapp={
+                register: drafts["whatsapp"][register].body for register in REGISTERS
+            },
+            email={
+                register: {
+                    "subject": drafts["email"][register].subject,
+                    "body": drafts["email"][register].body,
+                }
+                for register in REGISTERS
+            },
+            voice_script={
+                register: drafts["voice_script"][register].body
+                for register in REGISTERS
+            },
+        )
+
+    def send_draft(
+        self, case_id: str, channel: str, register: str, subject: str, body: str
+    ) -> NotificationRecord:
+        """Mock-send an (edited) draft into the shared message outbox.
+
+        The reviewer may edit the draft before sending; the record carries the
+        exact text that was approved.
+        """
+        if channel not in CHANNELS:
+            raise ValueError(f"Unknown channel: {channel}")
+        if register not in REGISTERS:
+            raise ValueError(f"Unknown register: {register}")
+        if not body.strip():
+            raise ValueError("Draft body cannot be empty")
+
+        record = NotificationRecord(
+            notification_id=f"notif_draft_{case_id[:8]}",
+            channel=channel,
+            template_key=f"draft:{case_id}:{channel}:{register}",
+            rendered_body=body if channel != "email" else f"{subject}\n\n{body}",
+            recipient="_reviewer_approved_",
+            state=ExecutionState.SUCCESS,
+        )
+        self._outbox.append(record)
+        return record
 
 
 def _pending(step: str) -> dict[str, str]:
@@ -391,10 +447,10 @@ def packet_to_dict(packet: DecisionPacket) -> dict[str, Any]:
             "expected_date": packet.settlement_projection.expected_date,
         },
         "channel_drafts": {
-            "sms": _pending("E.4 — channel template engine"),
-            "whatsapp": _pending("E.4 — channel template engine"),
-            "email": _pending("E.4 — channel template engine"),
-            "voice_script": _pending("E.4 — channel template engine"),
+            "sms": packet.channel_drafts.sms or _pending("E.6 — draft engine not configured"),
+            "whatsapp": packet.channel_drafts.whatsapp or _pending("E.6 — draft engine not configured"),
+            "email": packet.channel_drafts.email or _pending("E.6 — draft engine not configured"),
+            "voice_script": packet.channel_drafts.voice_script or _pending("E.6 — draft engine not configured"),
         },
         "language": packet.language,
     }
@@ -402,8 +458,9 @@ def packet_to_dict(packet: DecisionPacket) -> dict[str, Any]:
 
 # ── FastAPI router ────────────────────────────────────────────────────────
 
-from fastapi import APIRouter, HTTPException
 import threading
+
+from fastapi import APIRouter, HTTPException, Request
 
 router = APIRouter(tags=["case-inspector"])
 
@@ -420,6 +477,8 @@ def configure(
     optimizer: InterventionOptimizer | None = None,
     policy_engine: PolicyEngine | None = None,
     template_engine: TemplateEngine | None = None,
+    draft_generator: ChannelDraftGenerator | None = None,
+    outbox: list[object] | None = None,
 ) -> None:
     """Bind the case inspector to the SAME populated components the recovery run used."""
     global _inspector
@@ -431,6 +490,8 @@ def configure(
         optimizer=optimizer,
         policy_engine=policy_engine,
         template_engine=template_engine,
+        draft_generator=draft_generator,
+        outbox=outbox,
     )
 
 
@@ -459,3 +520,38 @@ def get_decision_packet(case_id: str) -> dict[str, Any]:
     
     data = packet_to_dict(packet)
     return guard_response(data, f"decision_packet:{case_id}").data
+
+
+@router.post("/api/cases/{case_id}/drafts/send")
+async def send_draft(case_id: str, request: Request) -> dict[str, Any]:
+    """Mock-send a reviewer-approved draft into the shared message outbox (E.6)."""
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Request body must be JSON") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Request body must be an object")
+
+    if _get_inspector().build_packet(case_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Decision packet not found for case_id={case_id}",
+        )
+    try:
+        record = _get_inspector().send_draft(
+            case_id=case_id,
+            channel=str(payload.get("channel", "")),
+            register=str(payload.get("register", "en")),
+            subject=str(payload.get("subject", "")),
+            body=str(payload.get("body", "")),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    data = {
+        "status": "queued",
+        "notification_id": record.notification_id,
+        "channel": record.channel,
+        "case_id": case_id,
+    }
+    return guard_response(data, f"draft_send:{case_id}").data

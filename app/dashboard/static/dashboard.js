@@ -5,6 +5,9 @@ let dashboardState = null;
 let selectedQueueFilter = "all";
 let selectedCaseId = null;
 let queueViewFilter = "all";  // "all" | "auto" | "human"
+let draftRegister = "en";  // "en" (English) | "hi-en" (Hinglish)
+const editedDrafts = {};  // `${channel}|${register}` -> {subject, body}
+let lastChannelDrafts = null;
 
 const palette = {
   emerald: "#087f5b",
@@ -799,33 +802,18 @@ function renderDecisionPacket(data) {
         </div>
       </article>
 
-      <!-- Channel Drafts (E.6 - placeholder) -->
-      <article class="surface card empty-section">
+      <!-- Channel Drafts (E.6) -->
+      <article class="surface card draft-editor-card">
         <header class="card-header">
-          <i data-lucide="message-square"></i>
-          <strong>Channel Drafts <span class="coming-soon">(E.6)</span></strong>
+          <i data-lucide="message-square-dot"></i>
+          <strong>Channel Drafts</strong>
+          <span class="register-toggle" aria-label="Draft register">
+            <button type="button" class="${draftRegister === "en" ? "active" : ""}" data-register="en">English</button>
+            <button type="button" class="${draftRegister === "hi-en" ? "active" : ""}" data-register="hi-en">Hinglish</button>
+          </span>
         </header>
-        <div class="draft-grid">
-          <div class="draft-placeholder">
-            <i data-lucide="smartphone"></i>
-            <span>SMS</span>
-            <small class="pending-badge">${escapeHTML(channelDrafts.sms?.pending || "E.6 — channel template engine")}</small>
-          </div>
-          <div class="draft-placeholder">
-            <i data-lucide="message-circle"></i>
-            <span>WhatsApp</span>
-            <small class="pending-badge">${escapeHTML(channelDrafts.whatsapp?.pending || "E.6 — channel template engine")}</small>
-          </div>
-          <div class="draft-placeholder">
-            <i data-lucide="mail"></i>
-            <span>Email</span>
-            <small class="pending-badge">${escapeHTML(channelDrafts.email?.pending || "E.6 — channel template engine")}</small>
-          </div>
-          <div class="draft-placeholder">
-            <i data-lucide="mic"></i>
-            <span>Voice script</span>
-            <small class="pending-badge">${escapeHTML(channelDrafts.voice_script?.pending || "E.6 — channel template engine")}</small>
-          </div>
+        <div class="draft-editor" id="draftEditor">
+          ${renderChannelDrafts(channelDrafts)}
         </div>
       </article>
 
@@ -861,6 +849,111 @@ function renderPolicyGates(gates) {
       </span>
     </div>
   `).join("");
+}
+
+function renderChannelDrafts(drafts) {
+  lastChannelDrafts = drafts;
+  const channels = [
+    { key: "sms", name: "SMS", icon: "smartphone" },
+    { key: "whatsapp", name: "WhatsApp", icon: "message-circle" },
+    { key: "email", name: "Email", icon: "mail" },
+    { key: "voice_script", name: "Voice script", icon: "mic" },
+  ];
+  return channels.map((ch) => {
+    const raw = drafts && drafts[ch.key];
+    const pending = raw && typeof raw === "object" && raw.pending;
+    if (pending || !raw) {
+      return `<div class="draft-editor-block">
+        <div class="draft-editor-head"><i data-lucide="${ch.icon}"></i><strong>${ch.name}</strong></div>
+        <div class="empty-placeholder">${escapeHTML(raw?.pending || "Draft unavailable")}</div>
+      </div>`;
+    }
+    const stored = editedDrafts[`${ch.key}|${draftRegister}`] || null;
+    const draft = stored || getRegisterDraft(raw, draftRegister) || getRegisterDraft(raw, "en") || {};
+    const subject = draft.subject || "";
+    const body = draft.body || "";
+    const smsLimit = ch.key === "sms" ? smsCharLimit(body) : null;
+    return `<div class="draft-editor-block" data-channel="${ch.key}">
+      <div class="draft-editor-head">
+        <i data-lucide="${ch.icon}"></i><strong>${ch.name}</strong>
+        ${smsLimit !== null ? `<span class="char-count ${body.length > smsLimit ? "over" : ""}">${body.length}/${smsLimit}</span>` : ""}
+      </div>
+      ${ch.key === "email" ? `<label class="draft-field"><span>Subject</span><input type="text" class="draft-subject" value="${escapeHTML(subject)}" /></label>` : ""}
+      <textarea class="draft-textarea" rows="${ch.key === "voice_script" ? 5 : 4}" placeholder="Draft not available for this register.">${escapeHTML(body)}</textarea>
+      <div class="draft-actions">
+        <button type="button" class="command-button small draft-send" data-channel="${ch.key}"><i data-lucide="send"></i>Send</button>
+        <span class="draft-status"></span>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function getRegisterDraft(raw, register) {
+  if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+    if (raw[register] !== undefined) return raw[register];
+  }
+  return null;
+}
+
+function smsCharLimit(text) {
+  return /[^\x00-\x7F]/.test(text || "") ? 70 : 160;
+}
+
+function editableDraftValue(channel) {
+  const block = document.querySelector(`.draft-editor-block[data-channel="${channel}"]`);
+  if (!block) return null;
+  const subjectEl = block.querySelector(".draft-subject");
+  const bodyEl = block.querySelector(".draft-textarea");
+  return { subject: subjectEl ? subjectEl.value : "", body: bodyEl ? bodyEl.value : "" };
+}
+
+function saveDraftEdit(channel) {
+  const value = editableDraftValue(channel);
+  if (value) editedDrafts[`${channel}|${draftRegister}`] = value;
+}
+
+function setDraftRegister(register) {
+  draftRegister = register;
+  document.querySelectorAll(".register-toggle button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.register === register);
+  });
+  const editor = document.getElementById("draftEditor");
+  if (editor && lastChannelDrafts) editor.innerHTML = renderChannelDrafts(lastChannelDrafts);
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function updateCharCount(textarea) {
+  const counter = textarea.closest(".draft-editor-block")?.querySelector(".char-count");
+  if (!counter) return;
+  const limit = smsCharLimit(textarea.value);
+  counter.textContent = `${textarea.value.length}/${limit}`;
+  counter.classList.toggle("over", textarea.value.length > limit);
+}
+
+async function sendDraft(channel) {
+  const block = document.querySelector(`.draft-editor-block[data-channel="${channel}"]`);
+  if (!block || !selectedCaseId) return;
+  const status = block.querySelector(".draft-status");
+  const value = editableDraftValue(channel);
+  if (!value || !value.body.trim()) {
+    status.textContent = "Body is empty";
+    status.classList.add("error");
+    return;
+  }
+  status.textContent = "Sending…";
+  status.classList.remove("error");
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(selectedCaseId)}/drafts/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel, register: draftRegister, subject: value.subject, body: value.body }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || `send failed (${res.status})`);
+    status.textContent = "Queued ✓";
+  } catch (err) {
+    status.textContent = `Failed: ${err.message}`;
+    status.classList.add("error");
+  }
 }
 
 function initControls() {
@@ -901,11 +994,32 @@ function initControls() {
 
   // Modal/drawer controls
   document.getElementById("closeInspector")?.addEventListener("click", closeInspectorModal);
+  document.getElementById("inspectorClose")?.addEventListener("click", closeInspectorModal);
   document.getElementById("inspectorModal")?.addEventListener("click", (e) => {
     if (e.target === document.getElementById("inspectorModal")) closeInspectorModal();
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeInspectorModal();
+  });
+
+  // Draft editor: persist edits, update char counts, toggle register, send.
+  const inspectorBody = document.getElementById("inspectorBody");
+  inspectorBody?.addEventListener("input", (e) => {
+    if (e.target.matches(".draft-textarea")) {
+      saveDraftEdit(e.target.closest(".draft-editor-block").dataset.channel);
+      updateCharCount(e.target);
+    } else if (e.target.matches(".draft-subject")) {
+      saveDraftEdit(e.target.closest(".draft-editor-block").dataset.channel);
+    }
+  });
+  inspectorBody?.addEventListener("click", (e) => {
+    const toggle = e.target.closest(".register-toggle button");
+    if (toggle) {
+      setDraftRegister(toggle.dataset.register);
+      return;
+    }
+    const sendBtn = e.target.closest(".draft-send");
+    if (sendBtn) sendDraft(sendBtn.dataset.channel);
   });
 }
 

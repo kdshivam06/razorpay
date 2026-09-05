@@ -237,5 +237,18 @@
       <div class="message-list" id="messageOutbox"></div>
     </section>
   </main>
+
+  <!-- Case Inspector drawer (E.1/E.2 decision packet, E.6 editable drafts) -->
+  <div class="modal-overlay" id="inspectorModal" hidden role="dialog" aria-modal="true" aria-labelledby="inspectorCaseId">
+    <div class="modal-drawer" id="inspectorDrawer">
+      <header class="modal-header">
+        <h2 id="inspectorCaseId">Case Inspector</h2>
+        <button type="button" class="icon-button" id="inspectorClose" aria-label="Close inspector">
+          <i data-lucide="x"></i>
+        </button>
+      </header>
+      <div class="modal-body" id="inspectorBody"></div>
+    </div>
+  </div>
 </body>
 </html>

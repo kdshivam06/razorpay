@@ -546,9 +546,22 @@ _dashboard_lock = threading.Lock()
 
 def configure(api: DashboardApi) -> None:
     """Bind the dashboard API to the SAME populated components the recovery
-    run used, so the served panels reflect what actually happened (§14)."""
+    run used, so the served panels reflect what actually happened (§14).
+
+    Also binds the Case Inspector (E.1/E.6) to the same tracer/audit and the
+    shared message outbox so decision packets and reviewer-approved drafts are
+    served from live demo state.
+    """
     global _dashboard
     _dashboard = api
+    from app.dashboard.case_inspector import configure as configure_inspector
+
+    configure_inspector(
+        tracer=api._tracer,
+        audit=api._audit,
+        prevention=api._prevention,
+        outbox=api._messages,
+    )
 
 
 def _get_dashboard() -> DashboardApi:

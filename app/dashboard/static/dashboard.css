@@ -1711,6 +1711,123 @@ button.attack:disabled {
   font-size: 13px;
 }
 
+/* Draft editor card (E.6) */
+.draft-editor-card .card-header {
+  align-items: center;
+}
+.register-toggle {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+}
+.register-toggle button {
+  border: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+.register-toggle button.active {
+  background: var(--ink);
+  color: var(--surface);
+}
+.draft-editor {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  padding: 14px 16px 16px;
+}
+.draft-editor-block {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  padding: 12px;
+}
+.draft-editor-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--ink);
+}
+.draft-editor-head svg {
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+.char-count {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.char-count.over {
+  color: var(--danger);
+}
+.draft-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.draft-subject,
+.draft-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.draft-subject {
+  padding: 8px 10px;
+}
+.draft-textarea {
+  resize: vertical;
+  padding: 10px;
+  font-family: inherit;
+  min-height: 70px;
+}
+.draft-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.draft-status {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--success, #10b981);
+}
+.draft-status.error {
+  color: var(--danger);
+}
+.draft-editor-block .empty-placeholder {
+  margin: 6px 0 0;
+  min-height: 40px;
+  padding: 12px;
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 8px;
+}
+.command-button.small {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
 .chip-high {
   color: #9b2f25;
   background: var(--coral-soft);

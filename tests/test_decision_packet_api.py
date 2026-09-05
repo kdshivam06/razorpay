@@ -4,7 +4,6 @@ Verifies the full structured decision packet is assembled from real
 Track A-C components, with pending markers for E.3/E.4/E.6 fields.
 """
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.audit.audit_logger import AuditLogger
@@ -13,7 +12,7 @@ from app.audit.prevention_log import PreventionLog
 from app.contracts import Action, CandidateAction
 from app.dashboard.case_inspector import CaseInspector, configure, packet_to_dict
 from app.main import app
-
+from app.nlp.message_templates import extract_amounts, extract_dates
 
 client = TestClient(app)
 
@@ -224,15 +223,40 @@ class TestDecisionPacketAPI:
         assert proj["net_yield"] == 15000000 - 225000 - 40500
         assert proj["expected_date"] is not None
 
-    def test_channel_drafts_have_pending_markers_for_e4(self):
-        """channel_drafts return pending markers for E.4."""
+    def test_channel_drafts_generated_per_register(self):
+        """channel_drafts contain validated drafts for SMS/WhatsApp/Email/Voice (E.6)."""
         response = client.get("/api/cases/RC_TEST_001/decision-packet")
         data = response.json()
 
         drafts = data["channel_drafts"]
         for channel in ["sms", "whatsapp", "email", "voice_script"]:
             assert channel in drafts
-            assert drafts[channel]["pending"] == "E.4 — channel template engine"
+            # Each channel has both registers: en (Standard English) and hi-en (Hinglish)
+            assert "en" in drafts[channel]
+            assert "hi-en" in drafts[channel]
+
+        # Email carries subject + body; both registers must have text
+        assert isinstance(drafts["email"]["en"], dict)
+        assert drafts["email"]["en"]["subject"]
+        assert drafts["email"]["en"]["body"]
+
+    def test_channel_drafts_amount_and_dates_match_case_record(self):
+        """Draft text never invents amounts/dates beyond the case record (§2.3, §10.7)."""
+        from datetime import date, datetime, timedelta, timezone
+
+        response = client.get("/api/cases/RC_TEST_001/decision-packet")
+        data = response.json()
+
+        sms_en = data["channel_drafts"]["sms"]["en"]
+        # Amount is derived from backend truth: revenue_at_risk_paise = ₹1,50,000
+        assert "₹1,50,000" in sms_en
+        assert extract_amounts(sms_en) == [15000000]
+
+        # Any date referenced stays within the case-sourced window (+7d expiry)
+        today = datetime.now(timezone.utc).date()
+        for iso in extract_dates(sms_en):
+            then = date.fromisoformat(iso)
+            assert today - timedelta(days=1) <= then <= today + timedelta(days=31)
 
     def test_language_defaults_to_en(self):
         """language field defaults to 'en'."""
@@ -246,8 +270,49 @@ class TestDecisionPacketAPI:
         assert response.status_code == 404
         assert "not found" in response.json()["detail"].lower()
 
+    def test_draft_send_queues_to_outbox(self):
+        """POST /drafts/send queues a reviewer-approved draft (E.6)."""
+        response = client.post(
+            "/api/cases/RC_TEST_001/drafts/send",
+            json={
+                "channel": "sms",
+                "register": "en",
+                "body": "Demo Merchant: Please pay ₹1,50,000 here: https://rzp.io/i/pl_rc_test_001",
+            },
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "queued"
+        assert body["channel"] == "sms"
+        assert body["case_id"] == "RC_TEST_001"
+        assert body["notification_id"].startswith("notif_draft_")
+
+    def test_draft_send_rejects_unknown_channel(self):
+        """POST /drafts/send with an invalid channel returns 400."""
+        response = client.post(
+            "/api/cases/RC_TEST_001/drafts/send",
+            json={"channel": "fax", "register": "en", "body": "ignored"},
+        )
+        assert response.status_code == 400
+
+    def test_draft_send_rejects_empty_body(self):
+        """POST /drafts/send with an empty body returns 400."""
+        response = client.post(
+            "/api/cases/RC_TEST_001/drafts/send",
+            json={"channel": "sms", "register": "en", "body": "   "},
+        )
+        assert response.status_code == 400
+
+    def test_draft_send_404_for_unknown_case(self):
+        """POST /drafts/send for an unknown case returns 404."""
+        response = client.post(
+            "/api/cases/RC_UNKNOWN_999/drafts/send",
+            json={"channel": "sms", "register": "en", "body": "x"},
+        )
+        assert response.status_code == 404
+
     def test_packet_to_dict_conversion(self):
-        """packet_to_dict produces correct JSON structure with pending markers."""
+        """packet_to_dict produces correct JSON structure with real drafts."""
         inspector = CaseInspector(
             tracer=self.tracer,
             audit=self.audit,
@@ -259,8 +324,10 @@ class TestDecisionPacketAPI:
         d = packet_to_dict(packet)
         assert d["case_id"] == "RC_TEST_001"
         assert d["diagnosis"]["rationale_text"]["pending"] == "E.3 — diagnosis rationale engine"
-        assert d["channel_drafts"]["sms"]["pending"] == "E.4 — channel template engine"
-        assert d["channel_drafts"]["email"]["pending"] == "E.4 — channel template engine"
+        # Drafts are real per-register content, not pending markers (E.6)
+        for channel in ["sms", "whatsapp", "email", "voice_script"]:
+            assert "en" in d["channel_drafts"][channel]
+            assert "hi-en" in d["channel_drafts"][channel]
 
     def test_blocked_policy_gates_when_trace_has_failures(self):
         """policy_gates shows FAIL when trace.policy_checks_failed is non-empty."""
@@ -410,7 +477,7 @@ class TestDecisionPacketEdgeCases:
         assert data["status"] == "RISK_ASSESSED"
 
     def test_pending_marker_format_consistency(self):
-        """All pending markers follow the same format."""
+        """Pending markers remain only for E.3 fields; drafts are real (E.6)."""
         response = client.get("/api/cases/RC_EDGE_001/decision-packet")
         data = response.json()
 
@@ -419,8 +486,8 @@ class TestDecisionPacketEdgeCases:
         assert "pending" in data["diagnosis"]["rationale_text"]
         assert data["diagnosis"]["rationale_text"]["pending"].startswith("E.3")
 
-        # channel_drafts
+        # channel_drafts are real per-register drafts, no pending markers remain
         for channel in ["sms", "whatsapp", "email", "voice_script"]:
             assert isinstance(data["channel_drafts"][channel], dict)
-            assert "pending" in data["channel_drafts"][channel]
-            assert data["channel_drafts"][channel]["pending"].startswith("E.4")
+            assert "en" in data["channel_drafts"][channel]
+            assert data["channel_drafts"][channel]["en"]
