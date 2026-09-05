@@ -11,6 +11,7 @@ import csv
 import hashlib
 import json
 import logging
+import random
 from pathlib import Path
 
 from app.audit.decision_trace import DecisionTracer, PolicyGateDetail
@@ -24,6 +25,9 @@ from app.policy.legal_basis import get_legal_basis
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BATCH_PATH = PROJECT_ROOT / "data" / "synthetic_batch.csv"
 GROUND_TRUTH_PATH = PROJECT_ROOT / "data" / "ground_truth.json"
+
+# Deterministic interleave for synthetic demo builds (E.10 ladder visibility).
+_INTERLEAVE_SEED = 2026_09_05
 
 COMMUNICATION_COSTS = {
     Action.SEND_SMS: 25,
@@ -50,8 +54,15 @@ HUMAN_REVIEW_REASONS = {
 
 
 def build_synthetic_demo_dashboard(limit: int | None = None) -> DashboardApi:
-    """Build a read-only dashboard from the synthetic evaluation dataset."""
+    """Build a read-only dashboard from the synthetic evaluation dataset.
+
+    Rows are deterministically interleaved so the top of the batch spans all
+    root-cause families — several overdue-invoice (Module D/B2B, MSMED §16)
+    and mandate cases stay visible in the first 250 the UI loads, instead of
+    the file's grouped ordering hiding them behind 384 insufficient-funds rows.
+    """
     rows = _read_batch()
+    random.Random(_INTERLEAVE_SEED).shuffle(rows)
     if limit is not None:
         rows = rows[:limit]
     return build_dashboard_from_rows(rows, dataset_name="synthetic_batch.csv")
@@ -604,7 +615,7 @@ def _build_policy_gate_details(
     else:
         details.append(PolicyGateDetail(
             gate_name="reversibility", result="PASS",
-            reason=f"Action within autonomy limits",
+            reason="Action within autonomy limits",
             legal_basis=legal_basis, legal_basis_description=description
         ))
     
@@ -657,7 +668,7 @@ def _build_action_reasoning(
         if segment == "SURE_THING":
             return f"No intervention needed — customer has high natural payment probability ({natural_prob:.0%}). Intervening would waste contact budget."
         if segment == "SLEEPING_DOG":
-            return f"Intervention may reduce payment probability for this Sleeping Dog segment. Best to wait."
+            return "Intervention may reduce payment probability for this Sleeping Dog segment. Best to wait."
         if segment == "LOST_CAUSE":
             return f"Low natural payment ({natural_prob:.0%}) and low incremental uplift. Contact budget better spent elsewhere."
         return f"No action has positive incremental value over natural payment ({natural_prob:.0%})."
@@ -666,13 +677,13 @@ def _build_action_reasoning(
         return f"No action has positive incremental value over natural payment ({natural_prob:.0%})."
 
     if selected_action == Action.WAIT:
-        return f"Waiting for optimal retry window — predicted best time increases payment probability."
+        return "Waiting for optimal retry window — predicted best time increases payment probability."
 
     if selected_action == Action.HUMAN_ESCALATION:
-        return f"Case requires human review — high value or complex situation."
+        return "Case requires human review — high value or complex situation."
 
     if selected_action == Action.BLOCK:
-        return f"Recovery blocked — active dispute or fraud risk."
+        return "Recovery blocked — active dispute or fraud risk."
 
     # For outbound actions, explain the economic rationale
     uplift = 0.0

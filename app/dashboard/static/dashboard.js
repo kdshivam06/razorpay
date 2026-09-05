@@ -6,6 +6,8 @@ let selectedQueueFilter = "all";
 let selectedCaseId = null;
 let queueViewFilter = "all";  // "all" | "auto" | "human"
 let draftRegister = "en";  // "en" (English) | "hi-en" (Hinglish)
+let msmedRegister = "en";  // statutory notice register
+let lastStatutory = null;  // E.10 statutory ladder snapshot for register toggling
 const editedDrafts = {};  // `${channel}|${register}` -> {subject, body}
 let lastChannelDrafts = null;
 
@@ -709,6 +711,8 @@ function renderDecisionPacket(data) {
   const policyGates = data.policy_gates || [];
   const settlement = data.settlement_projection || {};
   const channelDrafts = data.channel_drafts || {};
+  const stat = data.statutory && data.statutory.case_id ? data.statutory : null;
+  lastStatutory = stat;
 
   body.innerHTML = `
     <!-- Header banner -->
@@ -782,6 +786,8 @@ function renderDecisionPacket(data) {
           <div><dt>Expected date</dt><dd>${escapeHTML(settlement.expected_date || "—")}</dd></div>
         </dl>
       </article>
+
+      ${renderMsmedCard(stat)}
 
       <!-- Recommendation Banner -->
       <article class="surface card recommendation-banner ${requiresHuman ? "requires-human" : "auto-resolve"}">
@@ -872,6 +878,132 @@ function renderDecisionPacket(data) {
   `;
 
   if (window.lucide) window.lucide.createIcons();
+}
+
+// ── MSMED §16 statutory ladder card (E.10) ───────────────────────────────
+
+function renderMsmedCard(stat) {
+  if (!stat) return "";
+  if (!stat.applicable) {
+    return `
+    <article class="surface card msmed-card">
+      <header class="card-header">
+        <i data-lucide="banknote"></i>
+        <strong>MSMED §16 Statutory Ladder</strong>
+      </header>
+      <dl class="fact-list">
+        <div><dt>Applicability</dt><dd class="pending-badge">${escapeHTML(stat.applicable_label || "Not applicable")}</dd></div>
+        <div><dt>Days since invoice</dt><dd>Day ${stat.days_since_invoice}</dd></div>
+        <div><dt>Invoice date</dt><dd>${escapeHTML(stat.invoice_date)}</dd></div>
+      </dl>
+    </article>`;
+  }
+
+  const filing = stat.filing || {};
+  const notice = stat.notice?.[msmedRegister] || stat.notice?.en || null;
+  return `
+    <article class="surface card msmed-card">
+      <header class="card-header">
+        <i data-lucide="scale"></i>
+        <strong>MSMED §16 Statutory Ladder</strong>
+        <span class="chip chip-high">Rung ${stat.rung_number}</span>
+      </header>
+      <dl class="fact-list msmed-facts">
+        <div><dt>Rung</dt><dd>${escapeHTML(stat.rung_label || "")} — Day ${stat.days_since_invoice} of the statutory clock</dd></div>
+        <div><dt>Statutory rate</dt><dd>${escapeHTML(stat.statutory_rate_percent ?? "")}% p.a. (3 × RBI bank rate, monthly rests)</dd></div>
+        <div><dt>Accrual started</dt><dd>${escapeHTML(stat.accrual_start || "—")}</dd></div>
+        <div class="total-row"><dt>Principal</dt><dd>${fmt.format((stat.principal_paise || 0) / 100)}</dd></div>
+        <div><dt>Accrued §16 interest</dt><dd class="stat-interest">${fmt.format((stat.interest_paise || 0) / 100)}</dd></div>
+        <div class="total-row"><dt>Total statutory claim</dt><dd>${fmt.format((stat.total_statutory_claim_paise || 0) / 100)}</dd></div>
+      </dl>
+      ${notice ? `
+      <div class="msmed-notice">
+        <div class="msmed-notice-head">
+          <strong>Statutory notice draft</strong>
+          <span class="msmed-register-toggle">
+            <button type="button" class="${msmedRegister === "en" ? "active" : ""}" data-msmed-register="en">English</button>
+            <button type="button" class="${msmedRegister === "hi-en" ? "active" : ""}" data-msmed-register="hi-en">Hinglish</button>
+          </span>
+        </div>
+        <div class="msmed-notice-subject">${escapeHTML(notice.subject)}</div>
+        <pre class="msmed-notice-body">${escapeHTML(notice.body)}</pre>
+        <div class="msmed-notice-meta ${notice.source === "llm" ? "ok" : "warn"}">
+          ${notice.source === "llm"
+            ? `LLM-drafted, re-validated against the case record (§2.3) in ${notice.attempts} attempt(s)`
+            : "Deterministic fallback (§2.4) — every figure is backend-verified"}
+        </div>
+      </div>` : ""}
+      ${renderMsmedFiling(filing, stat.rung_number)}
+    </article>`;
+}
+
+function renderMsmedFiling(filing, rungNumber) {
+  if (rungNumber < 4) {
+    return `<div class="msmed-filing-hint">Rung 4 — an §18 conciliation filing through the MSME Samadhaan portal unlocks at Day 45+ (requires human sign-off).</div>`;
+  }
+  const state = filing?.state || "NOT_REQUESTED";
+  const btn = (action, label, danger) =>
+    `<button type="button" class="command-button small msmed-action ${danger ? "danger" : ""}" data-msmed-action="${action}">${label}</button>`;
+  let controls = "";
+  if (state === "NOT_REQUESTED") controls = btn("request", "Request §18 conciliation filing");
+  else if (state === "PENDING_SIGNOFF") controls = `${btn("approve", "Approve — human sign-off")} ${btn("reject", "Reject", true)}`;
+  else if (state === "APPROVED") controls = btn("dispatch", "Dispatch to MSME Samadhaan");
+  else if (state === "FILED") controls = `<span class="pending-badge">FILED to MSME Samadhaan</span>`;
+  else if (state === "REJECTED") controls = `<span class="pending-badge">Rejected — ${escapeHTML(filing.remark || "no remark")}</span>`;
+
+  const meta = filing?.filing_reference
+    ? `Reference ${escapeHTML(filing.filing_reference)} · requested ${escapeHTML(filing.requested_at)}${filing.approved_by ? ` · approved by ${escapeHTML(filing.approved_by)}` : ""}`
+    : "";
+  return `
+    <div class="msmed-filing">
+      <div class="msmed-filing-head">
+        <strong>§18 conciliation filing</strong>
+        <span class="chip ${state === "FILED" || state === "APPROVED" ? "chip-low" : state === "REJECTED" ? "chip-high" : ""}">${escapeHTML(state)}</span>
+      </div>
+      ${meta ? `<div class="quiet">${meta}</div>` : ""}
+      <div class="msmed-filing-controls">
+        ${controls}
+        <span class="quiet msmed-filing-note">No auto-file path — the ladder only dispatches after human sign-off.</span>
+      </div>
+      <div class="action-result" id="msmedActionResult"></div>
+    </div>`;
+}
+
+function setMsmedRegister(register) {
+  msmedRegister = register;
+  document.querySelectorAll("[data-msmed-register]").forEach((b) => {
+    b.classList.toggle("active", b.dataset.msmedRegister === register);
+  });
+  const subject = document.querySelector(".msmed-notice-subject");
+  const body = document.querySelector(".msmed-notice-body");
+  const meta = document.querySelector(".msmed-notice-meta");
+  const note = lastStatutory?.notice?.[register];
+  if (!subject || !body || !meta || !note) return;
+  subject.textContent = note.subject;
+  body.textContent = note.body;
+  meta.classList.toggle("ok", note.source === "llm");
+  meta.classList.toggle("warn", note.source !== "llm");
+  meta.textContent = note.source === "llm"
+    ? `LLM-drafted, re-validated against the case record (§2.3) in ${note.attempts} attempt(s)`
+    : "Deterministic fallback (§2.4) — every figure is backend-verified";
+}
+
+async function runMsmedAction(action) {
+  const outEl = document.getElementById("msmedActionResult");
+  if (outEl) outEl.innerHTML = '<span class="pending-badge">Working…</span>';
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(selectedCaseId)}/msmed/conciliation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, actor: "ops.reviewer", remark: "" }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`);
+    if (outEl) outEl.innerHTML = `<span class="ok-badge">${escapeHTML(action)} → ${escapeHTML(body.filing?.state || "")}</span>`;
+    await fetchDecisionPacket(selectedCaseId);
+  } catch (err) {
+    if (outEl) outEl.innerHTML = `<span class="error-banner">${escapeHTML(err.message)}</span>`;
+  }
 }
 
 function renderPolicyGates(gates) {
@@ -1202,6 +1334,13 @@ function initControls() {
     if (rzpLinkBtn) generateRazorpayLink();
     const rzpSimulateBtn = e.target.closest(".rzp-simulate-paid");
     if (rzpSimulateBtn) simulatePaymentLinkPaid();
+    const msmedRegBtn = e.target.closest("[data-msmed-register]");
+    if (msmedRegBtn) {
+      setMsmedRegister(msmedRegBtn.dataset.msmedRegister);
+      return;
+    }
+    const msmedBtn = e.target.closest(".msmed-action");
+    if (msmedBtn) runMsmedAction(msmedBtn.dataset.msmedAction);
   });
 }
 

@@ -558,7 +558,11 @@ def configure(api: DashboardApi) -> None:
     """
     global _dashboard
     _dashboard = api
-    from app.dashboard.case_inspector import configure as configure_inspector, case_customer_id
+    from app.b2b.msmed_interest import MsmedInterestCalculator
+    from app.b2b.msmed_ladder import MsmedEscalationLadder, MsmedFilingRegistry
+    from app.b2b.statutory_notice import StatutoryNoticeGenerator
+    from app.dashboard.case_inspector import case_customer_id
+    from app.dashboard.case_inspector import configure as configure_inspector
     from app.policy.policy_engine import PolicyEngine
 
     policy = PolicyEngine()
@@ -582,6 +586,10 @@ def configure(api: DashboardApi) -> None:
         human_queue=api._human_queue,
         policy_engine=policy,
         voice_save_dir=Path(__file__).resolve().parent / "static" / "audio",
+        msmed_calculator=MsmedInterestCalculator(),
+        msmed_ladder=MsmedEscalationLadder(),
+        msmed_notices=StatutoryNoticeGenerator(),
+        msmed_filings=MsmedFilingRegistry(),
     )
 
 

@@ -13,12 +13,23 @@ import dataclasses
 import logging
 import os
 import uuid
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from app.audit.audit_logger import AuditLogger
 from app.audit.decision_trace import DecisionTrace, DecisionTracer
 from app.audit.prevention_log import PreventionLog
+from app.b2b.msmed_interest import MsmedInterestCalculator
+from app.b2b.msmed_ladder import (
+    B2BReceivable,
+    ConciliationFiling,
+    MsmedEscalationLadder,
+    MsmedFilingRegistry,
+    MsmedStatus,
+    stable_digest,
+)
+from app.b2b.statutory_notice import StatutoryNoticeGenerator, build_notice_spec
 from app.config import get_settings
 from app.contracts import (
     Action,
@@ -136,6 +147,8 @@ class DecisionPacket:
     settlement_projection: SettlementProjection
     channel_drafts: ChannelDrafts
     language: str  # "en" | "hi-en"
+    case_narrative: str | None = None  # §1.2 one-paragraph "why this case is here"
+    statutory: dict | None = None  # E.10 MSMED §16 ladder + notices (B2B cases)
 
 
 class CaseInspector:
@@ -160,6 +173,11 @@ class CaseInspector:
         human_queue: HumanTaskQueue | None = None,
         payment_links: PaymentLinkLifecycle | None = None,
         razorpay_client: RazorpayPaymentLinkClient | None = None,
+        msmed_calculator: MsmedInterestCalculator | None = None,
+        msmed_ladder: MsmedEscalationLadder | None = None,
+        msmed_notices: StatutoryNoticeGenerator | None = None,
+        msmed_filings: MsmedFilingRegistry | None = None,
+        receivable_profiles: dict[str, B2BReceivable] | None = None,
     ) -> None:
         self._tracer = tracer or DecisionTracer()
         self._audit = audit or AuditLogger()
@@ -178,6 +196,14 @@ class CaseInspector:
         self._human_queue = human_queue or HumanTaskQueue()
         self._payment_links = payment_links or PaymentLinkLifecycle()
         self._razorpay_client = razorpay_client or RazorpayPaymentLinkClient()
+        self._msmed_calculator = msmed_calculator or MsmedInterestCalculator()
+        self._msmed_ladder = msmed_ladder or MsmedEscalationLadder(
+            calculator=self._msmed_calculator
+        )
+        self._msmed_notices = msmed_notices or StatutoryNoticeGenerator()
+        self._msmed_filings = msmed_filings or MsmedFilingRegistry()
+        self._receivable_profiles = dict(receivable_profiles or {})
+        self._last_rung: dict[str, int] = {}
 
     def build_packet(self, case_id: str) -> DecisionPacket | None:
         """Build the full decision packet for a case."""
@@ -223,6 +249,13 @@ class CaseInspector:
         # Build channel drafts
         channel_drafts = self._build_channel_drafts(trace)
 
+        # E.10 MSMED Act 2006 §16 statutory ladder (B2B overdue-invoice cases)
+        statutory = self._msmed_status_summary(trace)
+        case_narrative = (
+            getattr(trace, "case_narrative", None)
+            or self._compose_case_narrative(trace)
+        )
+
         # Determine language
         language = "en"  # Default; could be enhanced with customer preference
 
@@ -238,12 +271,276 @@ class CaseInspector:
             settlement_projection=settlement,
             channel_drafts=channel_drafts,
             language=language,
+            case_narrative=case_narrative,
+            statutory=statutory,
+        )
+
+    # ------------------------------------------------------------------
+    # MSMED Act 2006 §16 statutory ladder (E.10)
+    # ------------------------------------------------------------------
+    _B2B_ROOT_CAUSES = frozenset({"overdue_invoice"})
+
+    def _today(self) -> date:
+        """System date. Prefers the E.12 demo clock when installed."""
+        try:
+            from app.core.clock import clock
+
+            return clock.today()
+        except (ImportError, AttributeError):
+            return datetime.now(timezone.utc).date()
+
+    def _receivable_for(self, trace: DecisionTrace | None) -> B2BReceivable | None:
+        """Resolve the B2B receivable context for a trace.
+
+        Stored profiles are used verbatim; demo batches get a deterministic
+        projection (invoice age seeded from the case_id digest so the ladder
+        shows a spread of rungs). Both are labelled by ``profile_source``.
+        """
+        if trace is None:
+            return None
+        stored = self._receivable_profiles.get(trace.case_id)
+        if stored is not None:
+            return stored
+        if (trace.root_cause or "").lower() not in self._B2B_ROOT_CAUSES:
+            return None
+        return self._derive_receivable(trace)
+
+    def _derive_receivable(self, trace: DecisionTrace) -> B2BReceivable:
+        digest = stable_digest(trace.case_id)
+        offset_days = (digest % 50) + 12  # 12..61 calendar days old
+        invoice_date = trace.trigger_timestamp.date() - timedelta(days=offset_days)
+        buyer_no = (digest // 13) % 9000 + 1000
+        registered = (digest // 7) % 100 < 80  # ~80% of demo suppliers are MSME
+        return B2BReceivable(
+            case_id=trace.case_id,
+            invoice_id=f"INV-{trace.case_id.rsplit('_', 1)[-1]}",
+            buyer_name=f"Buyer {buyer_no} (demo)",
+            buyer_category="private",
+            invoice_date=invoice_date,
+            amount_paise=trace.revenue_at_risk_paise,
+            supplier_msme_registered=registered,
+            profile_source="demo_derived",
+        )
+
+    def _serialize_filing(self, filing: ConciliationFiling) -> dict[str, Any]:
+        return {
+            "state": filing.state.value,
+            "filing_reference": filing.filing_reference,
+            "requested_at": filing.requested_at.isoformat(),
+            "approved_by": filing.approved_by,
+            "approved_at": filing.approved_at.isoformat() if filing.approved_at else None,
+            "remark": filing.remark,
+            "dispatched": filing.dispatched,
+        }
+
+    def _draft_notices(self, status: MsmedStatus) -> dict[str, Any]:
+        """Draft the current rung's statutory notice in en + hi-en (E.6 guardrails)."""
+        spec = build_notice_spec(
+            status.receivable,
+            interest_paise=status.interest_paise,
+            claim_paise=status.total_claim_paise,
+            statutory_rate_percent=status.interest_rate_percent,
+            notice_date=status.today,
+            rung=status.rung,
+            filing_reference=(
+                self._msmed_filings.get(status.case_id).filing_reference
+                if self._msmed_filings.get(status.case_id)
+                else None
+            ),
+        )
+        notices: dict[str, Any] = {}
+        for register in ("en", "hi-en"):
+            draft = self._msmed_notices.generate(spec, register)
+            notices[register] = {
+                "subject": draft.subject,
+                "body": draft.body,
+                "source": draft.source,
+                "attempts": draft.attempts,
+            }
+        return notices
+
+    def _serialize_msmed_status(
+        self,
+        status: MsmedStatus,
+        *,
+        include_notice: bool = False,
+    ) -> dict[str, Any]:
+        base: dict[str, Any] = {
+            "case_id": status.case_id,
+            "applicable": status.statutory_applies,
+            "applicability": status.applicability.value,
+            "applicable_label": status.applicable_label,
+            "days_since_invoice": status.days_since_invoice,
+            "invoice_date": status.receivable.invoice_date.isoformat(),
+            "statutory_due_date": status.statutory_day_45.isoformat(),
+            "buyer_name": status.receivable.buyer_name,
+            "supplier_msme_registered": status.receivable.supplier_msme_registered,
+            "profile_source": status.profile_source,
+            "today": status.today.isoformat(),
+            "principal_paise": status.receivable.amount_paise,
+            "interest_paise": status.interest_paise,
+            "total_statutory_claim_paise": status.total_claim_paise,
+            "statutory_rate_percent": status.interest_rate_percent,
+            "accrual_start": status.accrual_start.isoformat() if status.accrual_start else None,
+        }
+        filing = self._msmed_filings.get(status.case_id)
+        if filing is not None:
+            base["filing"] = self._serialize_filing(filing)
+        if status.rung is not None:
+            base["rung"] = status.rung.value
+            base["rung_number"] = status.rung.number
+            base["rung_label"] = status.rung.label
+            base["rung_has_statutory_notice"] = status.rung.has_statutory_notice
+        if include_notice and status.statutory_applies and status.rung is not None and status.rung.has_statutory_notice:
+                base["notice"] = self._draft_notices(status)
+        return base
+
+    def _track_rung_escalation(self, status: MsmedStatus) -> None:
+        """Audit an MSMED ladder escalation when the rung rises (E.10)."""
+        current = status.rung.number if status.rung else 0
+        previous = self._last_rung.get(status.case_id)
+        self._last_rung[status.case_id] = current
+        if previous is None or current <= previous:
+            return
+        self._audit.append(
+            case_id=status.case_id,
+            trigger_type="policy",
+            trigger_event="msmed_ladder_escalation",
+            payload={
+                "from_rung": previous,
+                "to_rung": current,
+                "days_since_invoice": status.days_since_invoice,
+            },
+            action="MSMED_RUNG_ESCALATED",
+            amount_paise=status.total_claim_paise,
+            actor="system",
+        )
+
+    def _msmed_status_summary(self, trace: DecisionTrace | None) -> dict[str, Any] | None:
+        if trace is None:
+            return None
+        receivable = self._receivable_for(trace)
+        if receivable is None:
+            return None
+        status = self._msmed_ladder.state_for(receivable, self._today())
+        self._track_rung_escalation(status)
+        return self._serialize_msmed_status(status, include_notice=True)
+
+    def msmed_status(self, case_id: str) -> dict[str, Any] | None:
+        """Public status snapshot for the /msmed/status endpoint."""
+        return self._msmed_status_summary(self._tracer.latest_trace(case_id))
+
+    def msmed_advance(
+        self,
+        case_id: str,
+        *,
+        actor: str = "ops",
+    ) -> dict[str, Any] | None:
+        """Explicit ladder step (state machine) + audit. Never legal auto-file."""
+        trace = self._tracer.latest_trace(case_id)
+        receivable = self._receivable_for(trace)
+        if receivable is None:
+            return None
+        transition = self._msmed_ladder.advance(receivable, self._today())
+        status = self._msmed_ladder.state_for(receivable, self._today())
+        self._audit.append(
+            case_id=case_id,
+            trigger_type="policy",
+            trigger_event="msmed_ladder_advance",
+            payload={
+                "from_rung": transition.from_rung.value,
+                "to_rung": transition.to_rung.value,
+                "escalated": transition.escalated,
+                "days_since_invoice": transition.days_since_invoice,
+            },
+            action="MSMED_RUNG_ESCALATED" if transition.escalated else "MSMED_RUNG_RECALCULATED",
+            amount_paise=status.total_claim_paise,
+            actor=actor,
+        )
+        return {
+            "transition": {
+                "from_rung": transition.from_rung.value,
+                "to_rung": transition.to_rung.value,
+                "escalated": transition.escalated,
+                "days_since_invoice": transition.days_since_invoice,
+                "reason": transition.reason,
+            },
+            "status": self._serialize_msmed_status(status, include_notice=True),
+        }
+
+    def msmed_conciliation(
+        self,
+        case_id: str,
+        *,
+        action: str,
+        actor: str = "ops",
+        remark: str = "",
+    ) -> dict[str, Any] | None:
+        """Rung-4 filing workflow: request → approve/reject → (approved) dispatch.
+
+        The ladder itself enforces the gates (Day 45+, PENDING_SIGNOFF→APPROVED,
+        APPROVED→FILED). This endpoint only relays explicit human actions; no
+        request is ever auto-filed.
+        """
+        trace = self._tracer.latest_trace(case_id)
+        receivable = self._receivable_for(trace)
+        if receivable is None:
+            return None
+        today = self._today()
+        if action == "request":
+            filing = self._msmed_ladder.request_conciliation_filing(receivable, today)
+            if self._msmed_filings.get(case_id) is not None:
+                raise ValueError(
+                    f"An MSME Samadhaan filing already exists for case {case_id}"
+                )
+            self._msmed_filings.record(filing)
+            audit_action = "MSMED_CONCILIATION_REQUESTED"
+        elif action == "approve":
+            filing = self._msmed_filings.approve(
+                case_id, approved_by=actor, today=today
+            )
+            audit_action = "MSMED_CONCILIATION_APPROVED"
+        elif action == "reject":
+            filing = self._msmed_filings.reject(case_id, remark=remark, today=today)
+            audit_action = "MSMED_CONCILIATION_REJECTED"
+        elif action == "dispatch":
+            filing = self._msmed_filings.dispatch(case_id, today=today)
+            audit_action = "MSMED_CONCILIATION_DISPATCHED"
+        else:
+            raise ValueError(f"Unknown conciliation action: {action}")
+
+        self._audit.append(
+            case_id=case_id,
+            trigger_type="policy",
+            trigger_event=f"msmed_conciliation_{action}",
+            payload={
+                "filing_reference": filing.filing_reference,
+                "filing_state": filing.state.value,
+                "remark": remark,
+            },
+            action=audit_action,
+            amount_paise=receivable.amount_paise,
+            actor=actor,
+        )
+        return {
+            "ok": True,
+            "action": action,
+            "filing": self._serialize_filing(filing),
+        }
+
+    def _compose_case_narrative(self, trace: DecisionTrace) -> str:
+        """§1.2 one-paragraph 'why this case is here', composed from the trace."""
+        label = self._map_root_cause_to_label(trace.root_cause) or "payment failure"
+        return (
+            f"{label} case for {trace.case_id}: a {trace.revenue_at_risk_paise // 100}₹ "
+            f"receivable entered recovery because of {trace.root_cause or 'an unresolved failure'} "
+            f"({trace.trigger_event}). Current recovery state is {trace.state}; expected to "
+            f"resolve with no intervention in {round((trace.natural_payment_probability or 0) * 100)}% "
+            f"of similar cases within the natural window. Selected action: "
+            f"{trace.selected_action.value if trace.selected_action else 'NONE'}."
         )
 
     def _extract_decline_code(self, trace: DecisionTrace) -> str | None:
-        """Extract decline code from trigger event or metadata."""
-        # In real implementation, this would come from the webhook payload
-        # For now, infer from root_cause
         decline_map = {
             "insufficient_funds": "INSUFFICIENT_FUNDS",
             "expired_card": "EXPIRED_CARD",
@@ -977,6 +1274,9 @@ def packet_to_dict(packet: DecisionPacket) -> dict[str, Any]:
             "voice_script": packet.channel_drafts.voice_script or _pending("E.6 — draft engine not configured"),
         },
         "language": packet.language,
+        "case_narrative": packet.case_narrative,
+        "why_this_case": packet.case_narrative,
+        "statutory": packet.statutory or _pending("E.10 — non-B2B / not an overdue-invoice case"),
     }
 
 
@@ -1010,6 +1310,11 @@ def configure(
     human_queue: HumanTaskQueue | None = None,
     payment_links: PaymentLinkLifecycle | None = None,
     razorpay_client: RazorpayPaymentLinkClient | None = None,
+    msmed_calculator: MsmedInterestCalculator | None = None,
+    msmed_ladder: MsmedEscalationLadder | None = None,
+    msmed_notices: StatutoryNoticeGenerator | None = None,
+    msmed_filings: MsmedFilingRegistry | None = None,
+    receivable_profiles: dict[str, B2BReceivable] | None = None,
 ) -> None:
     """Bind the case inspector to the SAME populated components the recovery run used."""
     global _inspector
@@ -1030,6 +1335,11 @@ def configure(
         human_queue=human_queue,
         payment_links=payment_links,
         razorpay_client=razorpay_client,
+        msmed_calculator=msmed_calculator,
+        msmed_ladder=msmed_ladder,
+        msmed_notices=msmed_notices,
+        msmed_filings=msmed_filings,
+        receivable_profiles=receivable_profiles,
     )
 
 
@@ -1070,6 +1380,70 @@ def get_decision_packet(case_id: str) -> dict[str, Any]:
     
     data = packet_to_dict(packet)
     return guard_response(data, f"decision_packet:{case_id}").data
+
+
+@router.get("/api/cases/{case_id}/msmed/status")
+def get_msmed_status(case_id: str) -> dict[str, Any]:
+    """MSMED §16 ladder status snapshot (E.10) — read-only."""
+    data = _get_inspector().msmed_status(case_id)
+    if data is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No MSMED receivable context for case_id={case_id}",
+        )
+    return guard_response(data, f"msmed_status:{case_id}").data
+
+
+@router.post("/api/cases/{case_id}/msmed/status")
+async def refresh_msmed_status(case_id: str) -> dict[str, Any]:
+    """Recompute the ladder snapshot (live clock). Never auto-files (E.10)."""
+    if _get_inspector().build_packet(case_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Decision packet not found for case_id={case_id}",
+        )
+    data = _get_inspector().msmed_status(case_id)
+    if data is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No MSMED receivable context for case_id={case_id}",
+        )
+    return guard_response(data, f"msmed_status:{case_id}").data
+
+
+@router.post("/api/cases/{case_id}/msmed/conciliation")
+async def msmed_conciliation(case_id: str, request: Request) -> dict[str, Any]:
+    """Rung-4 filing workflow: request → approve/reject → (approved) dispatch.
+
+    The ladder enforces the hard gates (Day 45+; PENDING_SIGNOFF → APPROVED;
+    APPROVED → FILED). This endpoint never auto-files — every filing is
+    dispatched only after an explicit human-approval step.
+    """
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Request body must be JSON") from exc
+    action = str(payload.get("action", ""))
+    if action not in {"request", "approve", "reject", "dispatch"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown conciliation action: {action} (use request/approve/reject/dispatch)",
+        )
+    try:
+        data = _get_inspector().msmed_conciliation(
+            case_id,
+            action=action,
+            actor=str(payload.get("actor", "ops")),
+            remark=str(payload.get("remark", "")),
+        )
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if data is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No MSMED receivable context for case_id={case_id}",
+        )
+    return guard_response(data, f"msmed_conciliation:{case_id}").data
 
 
 @router.post("/api/cases/{case_id}/drafts/send")

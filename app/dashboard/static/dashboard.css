@@ -2115,3 +2115,121 @@ button.attack:disabled {
     transform: translateY(-8px);
   }
 }
+
+/* ── MSMED §16 statutory ladder card (E.10) ─────────────────────────────── */
+.msmed-card .msmed-facts dd {
+  font-variant-numeric: tabular-nums;
+}
+.msmed-card .stat-interest {
+  color: var(--coral, #e15b4a);
+  font-weight: 700;
+}
+.msmed-notice {
+  margin: 12px 16px 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.msmed-notice-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.msmed-register-toggle {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+}
+.msmed-register-toggle button {
+  border: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+.msmed-register-toggle button.active {
+  background: var(--ink);
+  color: var(--surface);
+}
+.msmed-notice-subject {
+  padding: 10px 12px 4px;
+  font-weight: 700;
+  font-size: 13px;
+}
+.msmed-notice-body {
+  margin: 0;
+  padding: 4px 12px 10px;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--muted-dark, var(--muted));
+}
+.msmed-notice-meta {
+  padding: 8px 12px;
+  font-size: 11px;
+  border-top: 1px solid var(--line);
+}
+.msmed-notice-meta.ok {
+  color: var(--emerald, #10b981);
+}
+.msmed-notice-meta.warn {
+  color: var(--muted);
+}
+.msmed-filing {
+  margin: 12px 16px 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+.msmed-filing-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.msmed-filing-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.msmed-filing-note {
+  font-size: 11px;
+}
+.msmed-filing-hint {
+  margin: 12px 16px 16px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+.msmed-action {
+  background: var(--ink);
+  color: var(--surface);
+  border: 0;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 12px;
+}
+.msmed-action.danger {
+  background: var(--danger, #b23b2e);
+  color: #fff;
+}

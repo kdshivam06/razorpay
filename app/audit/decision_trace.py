@@ -90,6 +90,9 @@ class DecisionTrace:
     requires_human_approval: bool = False
     reasoning: str = ""
 
+    # §1.2: one-paragraph "why this case is here" (E.13) / E.10 narrative
+    case_narrative: str = ""
+
     # Versions
     model_versions: dict = dataclasses.field(default_factory=dict)
 
@@ -134,6 +137,7 @@ class DecisionTracer:
         model_versions: dict | None = None,
         requires_human_approval: bool = False,
         reasoning: str = "",
+        case_narrative: str = "",
     ) -> DecisionTrace:
         """Build a complete decision trace and store it."""
         trace = DecisionTrace(
@@ -166,6 +170,7 @@ class DecisionTracer:
             model_versions=model_versions or {},
             requires_human_approval=requires_human_approval,
             reasoning=reasoning,
+            case_narrative=case_narrative,
         )
 
         self._traces.setdefault(case_id, []).append(trace)
