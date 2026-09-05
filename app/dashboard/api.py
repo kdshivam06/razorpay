@@ -717,14 +717,16 @@ def get_waterfall() -> dict:
 def get_scorecard() -> dict:
     api = _get_dashboard()
     data = api.scorecard()
-    data["lift"] = {
+    lift = {
         "treatment_payment_rate": api.control_vs_treatment_lift().treatment_payment_rate,
         "control_payment_rate": api.control_vs_treatment_lift().control_payment_rate,
         "lift_pp": api.control_vs_treatment_lift().lift_pp,
         "treatment_cases": api.control_vs_treatment_lift().treatment_cases,
         "control_cases": api.control_vs_treatment_lift().control_cases,
     }
-    return guard_response(data, "scorecard").data
+    guarded = guard_response(data, "scorecard").data
+    guarded["lift"] = lift
+    return guarded
 
 
 @router.get("/api/dashboard/uplift_segments")
