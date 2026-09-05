@@ -5,13 +5,16 @@ in the chain, with result in {PASS, FAIL, BLOCKED, SKIPPED} and a legal_basis.
 No gate is silently dropped.
 """
 
-import pytest
-
 from app.contracts import Action
-from app.core.recovery_case import RecoveryCase, UpliftSegment
 from app.core.obligation import Obligation, ObligationStatus
-from app.policy.policy_engine import PolicyEngine, GateResult
-from app.policy.legal_basis import get_legal_basis, STATUTORY_GATES, INTERNAL_GATES, all_gates
+from app.core.recovery_case import RecoveryCase, UpliftSegment
+from app.policy.legal_basis import (
+    INTERNAL_GATES,
+    STATUTORY_GATES,
+    all_gates,
+    get_legal_basis,
+)
+from app.policy.policy_engine import PolicyEngine
 
 
 class TestPolicyGateChecklist:
@@ -134,7 +137,10 @@ class TestPolicyGateChecklist:
         # All gates that can appear in evaluation
         possible_gates = {
             "consent", "contact_window", "customer_preference", "cooldown",
-            "fraud", "dispute", "reversibility", "blast_radius", "platform_awareness", "passthrough"
+            "fraud", "dispute", "reversibility", "blast_radius", "platform_awareness",
+            "passthrough",
+            "msmed_s16_interest", "msmed_demand_notice", "msmed_conciliation_filing",
+            "sms_dlt_template", "retry_limit", "autopay_execution_window",
         }
         assert possible_gates.issubset(registered), f"Missing registry entries: {possible_gates - registered}"
 
@@ -187,7 +193,9 @@ class TestPolicyGateLegalBasisRegistry:
         expected = {
             "consent", "contact_window", "customer_preference", "cooldown",
             "fraud", "dispute", "reversibility", "blast_radius",
-            "platform_awareness", "passthrough"
+            "platform_awareness", "passthrough",
+            "msmed_s16_interest", "msmed_demand_notice", "msmed_conciliation_filing",
+            "sms_dlt_template", "retry_limit", "autopay_execution_window",
         }
         assert expected.issubset(set(gates.keys()))
 

@@ -118,11 +118,33 @@ python -c "from app.ingestion.batch_loader import load_synthetic_batch; r=load_s
 Open the dashboard in a browser:
 
 - **Recovery Waterfall** — http://127.0.0.1:8000/static/index.html
+- **Case Intelligence** — http://127.0.0.1:8000/static/intelligence.html
 - **Attack the Agent** (interactive red-team demo) — http://127.0.0.1:8000/static/red_team.html
 
 Both are served by the D.1 (`/api/dashboard/*`) and D.2 (`/api/red-team/*`)
 routers. Use the demo's "Attack the Agent" page to trigger each exploit and
 watch the `ATTACK → DETECTED → BLOCKED → REASON` result.
+
+For a presenter-run, narration-synced walkthrough of sections 1–7 above
+(scorecard, anomaly clusters, demo clock, MSMED ladder, red team), see
+[`DEMO_SCRIPT.md`](DEMO_SCRIPT.md).
+
+For the hackathon bar ("measured money recovered across a batch, with compliant
+escalation, stopping rules, and an audit trail"), use:
+
+```bash
+python data/generate_synthetic.py
+curl -X POST http://127.0.0.1:8000/api/dashboard/load-synthetic
+curl http://127.0.0.1:8000/api/dashboard/dataset
+curl http://127.0.0.1:8000/api/dashboard/scorecard
+curl http://127.0.0.1:8000/api/dashboard/cases?limit=5
+curl http://127.0.0.1:8000/api/dashboard/messages
+```
+
+The Command Center can also process an uploaded CSV from the browser. The upload
+route accepts the same model-facing columns as `data/synthetic_batch.csv`; known
+synthetic case IDs are evaluated against held-out `data/ground_truth.json`, while
+unknown uploaded rows use deterministic model-style fallback estimates.
 
 ## Testing live Razorpay webhooks with ngrok
 
@@ -160,9 +182,53 @@ DUPLICATE / REJECTED results. Confirm the live path end-to-end:
 | GET | `/api/dashboard/uplift_segments` | §14.6 segment buckets |
 | GET | `/api/dashboard/contacts_avoided` | §14.4 contacts avoided |
 | GET | `/api/dashboard/exception_queue` | §14.6 human-review queue |
+| GET | `/api/dashboard/anomalies` | §16 AI Analyzer — anomaly clusters over recent traces (E.11) |
+| POST | `/api/dashboard/load-synthetic` | Load the synthetic batch into the in-memory dashboard (E.10) |
+| GET | `/api/cases/{case_id}/decision-packet` | §1.2 full decision packet incl. rationale + narrative (E.10) |
+| GET/POST | `/api/cases/{case_id}/msmed/status` | §16 MSMED ladder status; POST refreshes against the current clock |
+| POST | `/api/cases/{case_id}/msmed/conciliation` | Rung-4 filing workflow: request/approve/reject/dispatch (never auto-filed) |
+| POST | `/api/cases/{case_id}/drafts/send` | Send a drafted notice/message (E.10) |
+| POST | `/api/cases/{case_id}/action` | Execute a single circumscribed action on a case |
+| POST | `/api/cases/{case_id}/voice-nudge` | Generate + dispatch a voice nudge (E.10) |
+| POST | `/api/cases/{case_id}/payment-link` | Issue a payment link (E.10) |
+| GET | `/api/dev/clock` · POST `/api/dev/advance-clock` · `/api/dev/reset-clock` | E.12 demo clock: inspect/advance/reset the overridable UTC clock (dev only) |
+| POST | `/api/dev/simulate-webhook/payment-link-paid` | Real-time demo event: mark a payment link paid (E.10) |
 | GET | `/api/red-team/attacks` | List of §16.1 demo attacks |
 | POST | `/api/red-team/attack/{name}` | Trigger an attack; returns outcome |
 | GET | `/static/index.html`, `/static/red_team.html` | HTML/Chart.js dashboards |
+
+## Compliance & legal basis
+
+Every action the agent takes passes a policy gate that records its **legal basis
+or honest `internal_policy` label** on the decision trace. The registry lives in
+`app/policy/legal_basis.py` and is surfaced on every `policy_gates` entry in a
+decision packet. Statutory instruments are cited precisely — nothing is invented:
+
+| Gate / instrument | Legal basis | Type |
+|---|---|---|
+| `consent` | TRAI TCCCPR 2018 — purpose-scoped, revocable consent | Statutory |
+| `contact_window` | RBI MD (Recovery Agents) 2023 + TRAI TCCCPR 2018 | Statutory |
+| `dispute` | RBI MD (Recovery Agents) 2023 + Consumer Protection Act 2019 | Statutory |
+| `msmed_s16_interest` | MSMED Act 2006 §16 — interest at 3× RBI bank rate | Statutory |
+| `msmed_demand_notice` | MSMED Act 2006 §15 & §18 — 45-day timeline, formal demand | Statutory |
+| `msmed_conciliation_filing` | MSMED Act 2006 §§18–22 — MSSE Facilitation Council conciliation | Statutory (human-approved, never auto-filed) |
+| `sms_dlt_template` | TRAI TCCCPR 2018 — DLT-registered templates only | Statutory |
+| `customer_preference` | Merchant/customer contract terms | Internal policy |
+| `cooldown` | Contact-frequency caps (fatigue/harassment control) | Internal policy |
+| `fraud`, `risk_block` | Merchant risk thresholds | Internal policy |
+| `reversibility` | Impact-class → autonomy/RBAC | Internal policy |
+| `blast_radius` | Global rate anomaly circuit breaker | Internal policy |
+| `platform_awareness` | Dedup against actions Razorpay already took | Internal policy |
+| `retry_limit` | Per-channel retry caps | Internal policy |
+| `autopay_execution_window` | Mandate execution scheduling guard | Internal policy |
+| `passthrough` | NO_ACTION/WAIT/BLOCK — no contact, no financial effect | Internal policy |
+
+The E.10 MSMED ladder is deliberately conservative: §16 interest is **computed**,
+not charged; demand notices are **drafted** for human approval; conciliation
+filings go through an explicit `request → approve → dispatch` flow and are never
+auto-filed. The E.12 demo clock lets a presenter move the wall clock (±1h/±1d
+steps) to show the ladder re-evaluating a case against a future date — all
+citations and amounts recompute deterministically.
 
 ## Tests & linting
 

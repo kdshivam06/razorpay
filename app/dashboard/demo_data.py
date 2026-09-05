@@ -122,12 +122,13 @@ def build_dashboard_from_rows(
                 _send_demo_message(notifications, normalized, selected_action, amount)
 
             pg_details, requires_human = _build_policy_gate_details(normalized, segment, selected_action, policy_failed)
+            root_cause = str(normalized.get("root_cause") or normalized.get("failure_reason") or "unknown_error")
 
             tracer.build(
                 case_id=case_id,
                 trigger_event=str(normalized.get("event_type") or "synthetic_batch"),
                 state="RISK_ASSESSED",
-                root_cause=str(normalized.get("root_cause") or normalized.get("failure_reason")),
+                root_cause=root_cause,
                 natural_payment_probability=natural,
                 uplift_segment=segment,
                 revenue_at_risk_paise=amount,
@@ -145,8 +146,13 @@ def build_dashboard_from_rows(
                 policy_gate_details=pg_details,
                 diagnostic_rationale=_build_diagnostic_rationale(
                     str(normalized.get("failure_reason", "")),
-                    str(normalized.get("root_cause") or normalized.get("failure_reason")),
+                    root_cause,
                     str(normalized.get("decline_code", "")),
+                ),
+                case_narrative=_demo_case_narrative(
+                    case_id, customer_id=str(normalized.get("customer_id", "")),
+                    root_cause=root_cause, segment=segment, amount_paise=amount,
+                    selected_action=selected_action, outcome=outcome,
                 ),
                 execution_result="SUCCESS" if selected_action and not policy_failed else None,
                 execution_detail="Dataset-backed synthetic demo; no external side effect.",
@@ -462,6 +468,62 @@ def _build_diagnostic_rationale(failure_reason: str, root_cause: str, decline_co
     if decline_code and decline_code != "N/A":
         return f"{base} Decline code: {decline_code}."
     return base
+
+
+_NARRATIVE_OPENERS: dict[str, str] = {
+    "insufficient_funds": "The customer's account lacked sufficient balance when the last debit attempt ran, so the payment could not settle.",
+    "mandate_failure": "The scheduled automatic debit could not run because the mandate was revoked or rejected at the bank.",
+    "checkout_abandoned": "The customer reached checkout but left before completing payment, leaving the obligation unpaid.",
+    "bank_timeout": "The issuing bank never responded inside the allocated window, so the attempt timed out without a decision.",
+    "overdue_invoice": "The B2B invoice has passed its MSMED Act §15 45-day timeline and statutory interest under §16 accrues.",
+    "expired_card": "The card stored on file has expired, so authorisations fail until the customer updates the instrument.",
+    "unknown_error": "The payment failed with a generic or unmapped error, so recovery cannot rely on a single diagnosis.",
+    "gateway_error": "A temporary gateway or network fault interrupted processing before the bank could be reached.",
+    "risk_block": "Risk controls flagged the attempt as anomalous and blocked it before any money moved.",
+    "intl_decline": "The international card was declined, typically because the issuing bank rejected the cross-border authorisation.",
+    "dispute": "The customer filed a formal dispute against the charge, which halts all recovery outreach by policy.",
+}
+
+_NARRATIVE_ACTIONS: dict[str, str] = {
+    "SMS": "An SMS was dispatched through the approved channel plan",
+    "EMAIL": "An email was dispatched through the approved channel plan",
+    "WHATSAPP": "A WhatsApp message was dispatched through the approved channel plan",
+    "VOICE_CALL": "A voice call was placed through the approved channel plan",
+    "SEND_PAYMENT_LINK": "A payment link was generated and shared with the customer",
+}
+
+
+def _demo_case_narrative(
+    case_id: str,
+    customer_id: str,
+    root_cause: str,
+    segment: str,
+    amount_paise: int,
+    selected_action: Action | None,
+    outcome: str,
+) -> str:
+    """One-paragraph 'why this case is here' story, deterministic per demo row."""
+    opener = _NARRATIVE_OPENERS.get(
+        root_cause,
+        _NARRATIVE_OPENERS["unknown_error"],
+    )
+    personality = {
+        "SLEEPING_DOG": "The customer is a sleeping-dog segment, so outreach is limited to avoid harming natural recovery",
+        "PERSUADABLE": "The customer sits in a persuadable segment where a well-timed nudge lifts recovery",
+        "CONC": "The customer has low historical responsiveness, so recovery relies on structured escalation",
+    }.get(segment, f"The customer belongs to the {segment} segment")
+    action_sentence = (
+        "the action was approved and executed, and the case is marked "
+        f"{outcome.lower()}."
+        if selected_action is not None
+        else "no automated action was approved, so the case routes to human review or prevention logging."
+    )
+    rupees = f"{amount_paise / 100:,.0f}"
+    return (
+        f"{opener} The outstanding exposure is ₹{rupees}. "
+        f"{personality}. "
+        f"For case {case_id} ({customer_id}), {action_sentence}"
+    )
 
 
 def _build_policy_gate_details(

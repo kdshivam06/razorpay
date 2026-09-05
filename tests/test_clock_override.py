@@ -168,6 +168,7 @@ class TestMsmedLadderEndToEndDrivenByClock:
         monkeypatch.setenv("ENVIRONMENT", "development")
         case_id = "CLOCK_MSMED"
         tracer = DecisionTracer()
+        audit = AuditLogger()
         tracer.build(
             case_id=case_id,
             trigger_event="overdue.invoice.dunning",
@@ -182,7 +183,7 @@ class TestMsmedLadderEndToEndDrivenByClock:
         )
         configure(
             tracer=tracer,
-            audit=AuditLogger(),
+            audit=audit,
             prevention=PreventionLog(),
             outbox=[],
             msmed_calculator=MsmedInterestCalculator(bank_rate_percent=6.0),
@@ -220,3 +221,23 @@ class TestMsmedLadderEndToEndDrivenByClock:
         clock.reset()
         real_status = client.get(f"/api/cases/{case_id}/msmed/status").json()
         assert real_status["days_since_invoice"] != 167
+
+        clock.set(datetime(2026, 6, 16, 0, 0, tzinfo=_UTC))
+        for action in ("request", "approve", "dispatch"):
+            resp = client.post(
+                f"/api/cases/{case_id}/msmed/conciliation",
+                json={"action": action},
+            )
+            assert resp.status_code == 200, (action, resp.text)
+
+        msmed_events = [
+            e for e in audit._chain
+            if e.trigger_event and e.trigger_event.startswith("msmed_")
+        ]
+        filing_request = next(
+            e for e in msmed_events
+            if e.trigger_event == "msmed_conciliation_request"
+        )
+        assert filing_request.details["legal_basis"].startswith("Micro, Small and Medium Enterprises")
+        assert "§18" in filing_request.details["legal_basis"]
+        assert filing_request.action == "MSMED_CONCILIATION_REQUESTED"

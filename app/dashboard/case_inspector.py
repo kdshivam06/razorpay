@@ -69,6 +69,7 @@ from app.nlp.message_templates import (
     build_draft_context,
 )
 from app.optimizer.intervention_optimizer import InterventionOptimizer
+from app.policy.legal_basis import get_legal_basis
 from app.policy.policy_engine import PolicyEngine
 from app.revenue_risk.exposure_engine import ExposureEngine
 
@@ -404,6 +405,7 @@ class CaseInspector:
         self._last_rung[status.case_id] = current
         if previous is None or current <= previous:
             return
+        s16_basis, s16_description = get_legal_basis("msmed_s16_interest")
         self._audit.append(
             case_id=status.case_id,
             trigger_type="policy",
@@ -416,6 +418,8 @@ class CaseInspector:
             action="MSMED_RUNG_ESCALATED",
             amount_paise=status.total_claim_paise,
             actor="system",
+            legal_basis=s16_basis,
+            legal_basis_description=s16_description,
         )
 
     def _msmed_status_summary(self, trace: DecisionTrace | None) -> dict[str, Any] | None:
@@ -445,6 +449,7 @@ class CaseInspector:
             return None
         transition = self._msmed_ladder.advance(receivable, self._today())
         status = self._msmed_ladder.state_for(receivable, self._today())
+        s16_basis, s16_description = get_legal_basis("msmed_s16_interest")
         self._audit.append(
             case_id=case_id,
             trigger_type="policy",
@@ -458,6 +463,8 @@ class CaseInspector:
             action="MSMED_RUNG_ESCALATED" if transition.escalated else "MSMED_RUNG_RECALCULATED",
             amount_paise=status.total_claim_paise,
             actor=actor,
+            legal_basis=s16_basis,
+            legal_basis_description=s16_description,
         )
         return {
             "transition": {
@@ -511,6 +518,7 @@ class CaseInspector:
         else:
             raise ValueError(f"Unknown conciliation action: {action}")
 
+        filing_basis, filing_description = get_legal_basis("msmed_conciliation_filing")
         self._audit.append(
             case_id=case_id,
             trigger_type="policy",
@@ -523,6 +531,8 @@ class CaseInspector:
             action=audit_action,
             amount_paise=receivable.amount_paise,
             actor=actor,
+            legal_basis=filing_basis,
+            legal_basis_description=filing_description,
         )
         return {
             "ok": True,
