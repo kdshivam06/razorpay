@@ -9,6 +9,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.db.session import get_db  # noqa: F401  (exposes the session dependency)
@@ -22,6 +23,14 @@ logger = logging.getLogger("recoveryos")
 app = FastAPI(
     title="RecoveryOS — AI Revenue Recovery Optimizer",
     version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 _startup_ts = time.time()
@@ -159,6 +168,25 @@ app.include_router(red_team_router)
 
 _static_dir = Path(__file__).resolve().parent / "dashboard" / "static"
 app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+
+
+# ---------------------------------------------------------------------------
+# Auto-load synthetic demo data on startup
+# ---------------------------------------------------------------------------
+
+@app.on_event("startup")
+def _auto_load_synthetic_demo():
+    """Pre-populate the dashboard with the 2,184-row synthetic batch so the
+    dashboard is never empty when opened."""
+    try:
+        from app.dashboard.demo_data import build_synthetic_demo_dashboard
+        from app.dashboard.api import configure as configure_dashboard
+
+        api = build_synthetic_demo_dashboard()
+        configure_dashboard(api)
+        logger.info("Auto-loaded synthetic demo data (%s traces)", len(api._traces()))
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not auto-load synthetic demo data", exc_info=True)
 
 
 # ---------------------------------------------------------------------------

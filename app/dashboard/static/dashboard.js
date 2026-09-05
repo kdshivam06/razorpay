@@ -1,4 +1,4 @@
-const API = "";
+const API = "http://127.0.0.1:8000";
 const fmt = new Intl.NumberFormat("en-IN");
 const charts = {};
 let dashboardState = null;
@@ -1737,6 +1737,15 @@ function priorityClass(priority) {
 
 function capitalize(value) {
   return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+}
+
+function cleanLabel(value) {
+  return String(value || "")
+    .replaceAll("_", " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function escapeHTML(value) {
