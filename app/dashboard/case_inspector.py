@@ -10,7 +10,9 @@ per case by the §10.7 template engine with LLM hallucination guardrails (E.6).
 from __future__ import annotations
 
 import dataclasses
+import logging
 import uuid
+from pathlib import Path
 from typing import Any
 
 from app.audit.audit_logger import AuditLogger
@@ -22,7 +24,13 @@ from app.core.recovery_case import RecoveryCase
 from app.dashboard.render_guard import guard_response
 from app.executor.human_queue import HumanTask, HumanTaskQueue, priority_for
 from app.executor.notification import NotificationRecord, NotificationSender
-from app.executor.voice_agent import VoiceRecovery
+from app.executor.voice_agent import (
+    DEFAULT_TTS_VOICE,
+    VoiceNudge,
+    VoiceRecovery,
+    VoiceSynthesis,
+    VoiceSynthesisError,
+)
 from app.nlp.message_templates import (
     CHANNELS,
     REGISTERS,
@@ -33,6 +41,8 @@ from app.nlp.message_templates import (
 from app.optimizer.intervention_optimizer import InterventionOptimizer
 from app.policy.policy_engine import PolicyEngine
 from app.revenue_risk.exposure_engine import ExposureEngine
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -128,6 +138,8 @@ class CaseInspector:
         outbox: list[object] | None = None,
         notification_sender: NotificationSender | None = None,
         voice_agent: VoiceRecovery | None = None,
+        voice_synthesis: VoiceSynthesis | None = None,
+        voice_save_dir: str | Path | None = None,
         human_queue: HumanTaskQueue | None = None,
     ) -> None:
         self._tracer = tracer or DecisionTracer()
@@ -141,6 +153,9 @@ class CaseInspector:
         self._outbox = outbox if outbox is not None else []
         self._notifications = notification_sender or NotificationSender()
         self._voice = voice_agent or VoiceRecovery()
+        self._synthesis = voice_synthesis or VoiceSynthesis()
+        self._voice_nudges: dict[str, VoiceNudge] = {}
+        self._voice_save_dir = Path(voice_save_dir) if voice_save_dir is not None else None
         self._human_queue = human_queue or HumanTaskQueue()
 
     def build_packet(self, case_id: str) -> DecisionPacket | None:
@@ -578,6 +593,89 @@ class CaseInspector:
         outcome = self._voice.handle_call(call_id, "Customer did not pick up yet")
         return call_id, f"Voice call placed ({outcome.state.value})"
 
+    def get_voice_nudge(self, nudge_id: str) -> VoiceNudge | None:
+        """Return a previously synthesized voice nudge by id."""
+        return self._voice_nudges.get(nudge_id)
+
+    def generate_voice_nudge(
+        self,
+        case_id: str,
+        register: str,
+        *,
+        voice: str = DEFAULT_TTS_VOICE,
+        actor: str,
+    ) -> tuple[VoiceNudge, str]:
+        """Synthesize the case's voice_script draft into playable audio (E.8).
+
+        Uses Gemini native TTS via the shared GEMINI_API_KEY. This is a
+        SIMULATED outbound call: the audible nudge is saved and a "call"
+        record is written to the audit trail — no live phone is dialled.
+        Returns (nudge, call_state).
+        """
+        if register not in REGISTERS:
+            raise ValueError(f"Unknown register: {register}")
+        packet = self.build_packet(case_id)
+        if packet is None:
+            raise KeyError(f"No decision packet for case_id={case_id}")
+        script = (packet.channel_drafts.voice_script or {}).get(register)
+        if not script:
+            raise ValueError(f"No voice_script draft for register '{register}'")
+
+        nudge = self._synthesis.synthesize(script, voice=voice)
+        self._voice_nudges[nudge.nudge_id] = nudge
+        if self._voice_save_dir is not None:
+            nudge.save(self._voice_save_dir)
+        call_state = self._record_voice_call(
+            case_id=case_id,
+            register=register,
+            nudge=nudge,
+            actor=actor,
+        )
+        logger.info(
+            "Voice nudge %s recorded as simulated %s call for %s",
+            nudge.nudge_id,
+            register,
+            case_id,
+        )
+        return nudge, call_state
+
+    def _record_voice_call(
+        self,
+        *,
+        case_id: str,
+        register: str,
+        nudge: VoiceNudge,
+        actor: str,
+    ) -> str:
+        """Write the simulated outbound "call" into the append-only audit trail."""
+        outcome = self._voice.handle_call(
+            call_id=f"call_{nudge.nudge_id}",
+            transcript=nudge.text,
+        )
+        self._audit.append(
+            trigger_type="VOICE_CALL_RECORDED",
+            trigger_event=f"simulated_outbound_call_{register}",
+            payload={
+                "actor": actor,
+                "register": register,
+                "text": nudge.text,
+                "audio_id": nudge.nudge_id,
+                "state": outcome.state.value,
+            },
+            case_id=case_id,
+            audio_id=nudge.nudge_id,
+            voice=nudge.voice,
+            model=nudge.model,
+            media_type=nudge.media_type,
+            duration_seconds=nudge.duration_seconds,
+            call_state=outcome.state.value,
+            summary=outcome.summary,
+            transcript=nudge.text,
+            actor=actor,
+            register=register,
+        )
+        return outcome.state.value
+
     def _enqueue_human_task(self, case: RecoveryCase) -> str:
         """Escalate a case to the human-in-the-loop queue (§8.6)."""
         priority, sla = priority_for(
@@ -718,7 +816,7 @@ def packet_to_dict(packet: DecisionPacket) -> dict[str, Any]:
 
 import threading
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 
 router = APIRouter(tags=["case-inspector"])
 
@@ -739,6 +837,8 @@ def configure(
     outbox: list[object] | None = None,
     notification_sender: NotificationSender | None = None,
     voice_agent: VoiceRecovery | None = None,
+    voice_synthesis: VoiceSynthesis | None = None,
+    voice_save_dir: str | Path | None = None,
     human_queue: HumanTaskQueue | None = None,
 ) -> None:
     """Bind the case inspector to the SAME populated components the recovery run used."""
@@ -755,6 +855,8 @@ def configure(
         outbox=outbox,
         notification_sender=notification_sender,
         voice_agent=voice_agent,
+        voice_synthesis=voice_synthesis,
+        voice_save_dir=voice_save_dir,
         human_queue=human_queue,
     )
 
@@ -885,3 +987,64 @@ async def take_action(case_id: str, request: Request) -> dict[str, Any]:
     if not outcome.executed:
         raise HTTPException(status_code=409, detail=data)
     return guard_response(data, f"action:{case_id}").data
+
+
+@router.post("/api/cases/{case_id}/voice-nudge")
+async def generate_voice_nudge(case_id: str, request: Request) -> dict[str, Any]:
+    """Synthesize the case's voice_script draft into playable audio (E.8).
+
+    Calls Gemini native TTS (shared GEMINI_API_KEY) and records a simulated
+    outbound "call" in the audit trail. Returns an audio_url the browser can
+    stream through a standard <audio> player.
+    """
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Request body must be JSON") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Request body must be an object")
+
+    register = str(payload.get("register") or "en")
+    voice = str(payload.get("voice") or DEFAULT_TTS_VOICE)
+    actor = str(payload.get("actor") or "ops.voice_nudge")
+
+    inspector = _get_inspector()
+    try:
+        nudge, call_state = inspector.generate_voice_nudge(
+            case_id, register, voice=voice, actor=actor
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except VoiceSynthesisError as exc:
+        raise HTTPException(status_code=502, detail=f"Voice synthesis failed: {exc}") from exc
+
+    data = {
+        "nudge_id": nudge.nudge_id,
+        "case_id": case_id,
+        "register": register,
+        "text": nudge.text,
+        "voice": nudge.voice,
+        "model": nudge.model,
+        "media_type": nudge.media_type,
+        "duration_seconds": nudge.duration_seconds,
+        "audio_url": f"/api/cases/{case_id}/voice-nudge/audio/{nudge.nudge_id}",
+        "call_state": call_state,
+    }
+    return guard_response(data, f"voice_nudge:{case_id}").data
+
+
+@router.get("/api/cases/{case_id}/voice-nudge/audio/{nudge_id}")
+def get_voice_nudge_audio(case_id: str, nudge_id: str) -> Response:
+    """Stream the synthesized voice nudge WAV for in-browser playback (E.8)."""
+    nudge = _get_inspector().get_voice_nudge(nudge_id)
+    if nudge is None:
+        raise HTTPException(
+            status_code=404, detail=f"No voice nudge audio for nudge_id={nudge_id}"
+        )
+    return Response(
+        content=nudge.wav_bytes,
+        media_type="audio/wav",
+        headers={"Cache-Control": "no-store"},
+    )

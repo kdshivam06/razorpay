@@ -21,6 +21,7 @@ import io
 import threading
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.audit.decision_trace import DecisionTrace, DecisionTracer
 from app.audit.prevention_log import PreventionLog
@@ -580,6 +581,7 @@ def configure(api: DashboardApi) -> None:
         outbox=api._messages,
         human_queue=api._human_queue,
         policy_engine=policy,
+        voice_save_dir=Path(__file__).resolve().parent / "static" / "audio",
     )
 
 

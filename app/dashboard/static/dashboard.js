@@ -912,8 +912,10 @@ function renderChannelDrafts(drafts) {
       <textarea class="draft-textarea" rows="${ch.key === "voice_script" ? 5 : 4}" placeholder="Draft not available for this register.">${escapeHTML(body)}</textarea>
       <div class="draft-actions">
         <button type="button" class="command-button small draft-send" data-channel="${ch.key}"><i data-lucide="send"></i>Send</button>
+        ${ch.key === "voice_script" ? `<button type="button" class="command-button small voice-nudge-generate" data-channel="voice_script"><i data-lucide="mic"></i>Generate &amp; Play Voice Nudge</button>` : ""}
         <span class="draft-status"></span>
       </div>
+      ${ch.key === "voice_script" ? `<div class="voice-nudge-player" data-nudge-slot="voice_script"></div>` : ""}
     </div>`;
   }).join("");
 }
@@ -980,6 +982,34 @@ async function sendDraft(channel) {
     });
     if (!res.ok) throw new Error((await res.json()).detail || `send failed (${res.status})`);
     status.textContent = "Queued ✓";
+  } catch (err) {
+    status.textContent = `Failed: ${err.message}`;
+    status.classList.add("error");
+  }
+}
+
+async function generateVoiceNudge() {
+  const block = document.querySelector('.draft-editor-block[data-channel="voice_script"]');
+  const slot = block?.querySelector('[data-nudge-slot="voice_script"]');
+  const status = block?.querySelector(".draft-status");
+  if (!block || !slot || !selectedCaseId) return;
+  status.textContent = "Synthesizing…";
+  status.classList.remove("error");
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(selectedCaseId)}/voice-nudge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ register: draftRegister }),
+    });
+    if (!res.ok) {
+      const detail = await res.json();
+      throw new Error((detail && detail.detail) || `voice nudge failed (${res.status})`);
+    }
+    const data = await res.json();
+    slot.innerHTML = `<audio controls src="${escapeHTML(data.audio_url)}" preload="none"></audio>
+      <span class="voice-nudge-meta">${escapeHTML(data.voice)} · ${Number(data.duration_seconds).toFixed(1)}s · simulated call (${escapeHTML(data.call_state)})</span>`;
+    status.textContent = "Ready ✓";
+    if (window.lucide) window.lucide.createIcons();
   } catch (err) {
     status.textContent = `Failed: ${err.message}`;
     status.classList.add("error");
@@ -1100,6 +1130,8 @@ function initControls() {
     }
     const sendBtn = e.target.closest(".draft-send");
     if (sendBtn) sendDraft(sendBtn.dataset.channel);
+    const nudgeBtn = e.target.closest(".voice-nudge-generate");
+    if (nudgeBtn) generateVoiceNudge();
     const approveBtn = e.target.closest(".action-send-review");
     if (approveBtn) {
       const ch = document.getElementById("actionChannel")?.value || "sms";
