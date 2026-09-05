@@ -5,9 +5,10 @@ from __future__ import annotations
 import dataclasses
 import re
 from calendar import monthrange
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 
 from app.contracts import ConversationalIntent
+from app.core.clock import clock
 from app.nlp.gemini_client import JsonLlmClient, clamp, normalize, try_generate_json
 
 
@@ -33,7 +34,7 @@ class PtpExtractor:
         self, llm: JsonLlmClient | None = None, today: date | None = None
     ) -> None:
         self.llm = llm
-        self.today = today or datetime.now(UTC).date()
+        self.today = today or clock.today()
 
     def extract(self, text: str, language: str = "hinglish") -> PtpExtraction:
         rule = _rule_extract(text, self.today)

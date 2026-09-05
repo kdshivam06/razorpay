@@ -27,10 +27,10 @@ import hashlib
 import hmac
 import json
 import time
-from datetime import datetime, timezone
 
-from app.contracts import Action, ExecutionState, PolicyGateResult, PaymentLinkState
-from app.core.dependency_health import DependencyHealth, DependencyStatus
+from app.contracts import Action, ExecutionState, PaymentLinkState, PolicyGateResult
+from app.core.clock import clock
+from app.core.dependency_health import DependencyHealth
 from app.core.obligation import Obligation
 from app.core.recovery_case import RecoveryCase
 from app.executor.circuit_breaker import CircuitBreaker
@@ -284,7 +284,7 @@ class RedTeamApi:
                 blocked_channels=("sms", "email", "whatsapp", "voice"),
             )
         )
-        now = datetime.now(timezone.utc)
+        now = clock.now()
         blocked = not any(
             self._preferences.can_contact(customer_id, ch, now)
             for ch in ("sms", "email", "whatsapp", "voice")

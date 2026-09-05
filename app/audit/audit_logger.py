@@ -17,7 +17,9 @@ import hashlib
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
+
+from app.core.clock import clock
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +73,7 @@ class AuditLogger:
         **extra: object,
     ) -> AuditEntry:
         """Append a new entry to the hash chain."""
-        now = datetime.now(timezone.utc)
+        now = clock.now()
 
         # Hash the payload
         payload_json = json.dumps(payload, sort_keys=True, default=str)

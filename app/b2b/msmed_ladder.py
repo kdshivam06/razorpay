@@ -31,10 +31,7 @@ import enum
 import hashlib
 from datetime import date, timedelta
 
-from app.b2b.msmed_interest import (
-    MsmedInterestCalculator,
-    compute_interest_run,
-)
+from app.b2b.msmed_interest import MsmedInterestCalculator
 
 STANDARD_TERMS_LABEL = "standard commercial terms apply — §16 does not apply"
 
@@ -233,11 +230,10 @@ class MsmedEscalationLadder:
                 accrual_start=None,
             )
 
-        run = compute_interest_run(
+        run = self._calculator.run(
             receivable.amount_paise,
             receivable.invoice_date,
             today,
-            bank_rate_percent=None,
         )
         return MsmedStatus(
             case_id=receivable.case_id,

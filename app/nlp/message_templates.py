@@ -13,8 +13,9 @@ from __future__ import annotations
 import dataclasses
 import re
 import string
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
+from app.core.clock import clock
 from app.nlp.gemini_client import normalize, try_generate_json
 
 
@@ -205,7 +206,7 @@ def build_draft_context(
     dates come from the case trigger timestamp plus fixed lead times. The
     LLM cannot introduce its own amounts or dates.
     """
-    dt = trigger_dt or datetime.now(timezone.utc)
+    dt = trigger_dt or clock.now()
     trigger_date = dt.strftime("%Y-%m-%d")
     expiry = (dt + timedelta(days=7)).strftime("%Y-%m-%d")
     due_date = (dt + timedelta(days=3)).strftime("%Y-%m-%d")

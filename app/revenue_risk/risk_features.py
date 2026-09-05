@@ -6,6 +6,7 @@ import dataclasses
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+from app.core.clock import clock
 from app.core.recovery_case import RecoveryCase
 
 if TYPE_CHECKING:
@@ -76,7 +77,7 @@ class FeatureBuilder:
 
 def _epoch_seconds(value: object) -> int:
     if value in (None, ""):
-        return int(datetime.now(timezone.utc).timestamp())
+        return int(clock.now().timestamp())
     if isinstance(value, int | float):
         return int(value)
     text = str(value)

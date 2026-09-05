@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import math
 import os
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -37,6 +38,7 @@ from app.contracts import (
     PaymentLinkState,
     PolicyGateResult,
 )
+from app.core.clock import clock
 from app.core.obligation import Obligation
 from app.core.recovery_case import RecoveryCase
 from app.dashboard.render_guard import guard_response
@@ -1696,3 +1698,74 @@ async def simulate_payment_link_paid(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     return guard_response(result, f"simulate_webhook:{case_id}").data
+
+
+@router.get("/api/dev/clock")
+async def get_dev_clock() -> dict[str, Any]:
+    """E.12 dev-only: current demo clock state (pinned or real).
+
+    Gated on ENVIRONMENT=development (or APP_ENV) like the E.9 webhook
+    simulator. Read-only.
+    """
+    if not _is_development():
+        raise HTTPException(
+            status_code=404,
+            detail="Dev-only endpoint — not enabled outside ENVIRONMENT=development",
+        )
+    now = clock.now()
+    return guard_response(
+        {
+            "overridden": clock.is_overridden(),
+            "now_utc": now.isoformat(),
+            "today": now.date().isoformat(),
+        },
+        "dev:clock",
+    ).data
+
+
+@router.post("/api/dev/advance-clock")
+async def advance_dev_clock(hours: float = 1.0) -> dict[str, Any]:
+    """E.12 dev-only: pin the demo clock and move it forward by ``hours``.
+
+    Every time-sensitive path (policy gates, cooldowns, MSMED §16 accrual,
+    notice-stage dates, PTP dates) reads the pin, so the demo can step
+    'today' forward and watch ladder stages progress. Negative hours move it
+    back. Returns the new pin as UTC ISO.
+    """
+    if not _is_development():
+        raise HTTPException(
+            status_code=404,
+            detail="Dev-only endpoint — not enabled outside ENVIRONMENT=development",
+        )
+    if not math.isfinite(hours) or abs(hours) > 24 * 366:
+        raise HTTPException(status_code=400, detail="hours must be finite and <= 366 days")
+    pinned = clock.advance(hours=hours)
+    return guard_response(
+        {
+            "overridden": True,
+            "now_utc": pinned.isoformat(),
+            "today": pinned.date().isoformat(),
+            "advanced_hours": hours,
+        },
+        "dev:advance_clock",
+    ).data
+
+
+@router.post("/api/dev/reset-clock")
+async def reset_dev_clock() -> dict[str, Any]:
+    """E.12 dev-only: drop the pin and return to real wall-clock time."""
+    if not _is_development():
+        raise HTTPException(
+            status_code=404,
+            detail="Dev-only endpoint — not enabled outside ENVIRONMENT=development",
+        )
+    clock.reset()
+    now = clock.now()
+    return guard_response(
+        {
+            "overridden": False,
+            "now_utc": now.isoformat(),
+            "today": now.date().isoformat(),
+        },
+        "dev:reset_clock",
+    ).data

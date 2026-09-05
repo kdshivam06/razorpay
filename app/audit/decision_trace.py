@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 from app.contracts import Action, CandidateAction
+from app.core.clock import clock
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +144,7 @@ class DecisionTracer:
         trace = DecisionTrace(
             case_id=case_id,
             trigger_event=trigger_event,
-            trigger_timestamp=datetime.now(timezone.utc),
+            trigger_timestamp=clock.now(),
             state=state,
             root_cause=root_cause,
             natural_payment_probability=natural_payment_probability,

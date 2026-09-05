@@ -22,9 +22,10 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 from app.contracts import Action, PolicyGateResult
+from app.core.clock import clock
 from app.core.obligation import ObligationStatus
 from app.core.recovery_case import RecoveryCase
 from app.policy.blast_radius import BlastRadiusGuard
@@ -33,9 +34,9 @@ from app.policy.contact_policy import Channel, ContactPolicyEngine
 from app.policy.cooldown_manager import CooldownManager
 from app.policy.customer_preferences import CustomerPreferenceEngine
 from app.policy.fraud_detector import FraudDetector
+from app.policy.legal_basis import get_legal_basis
 from app.policy.platform_awareness import PlatformAwareness
 from app.policy.reversibility import ReversibilityScorer
-from app.policy.legal_basis import get_legal_basis
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +162,7 @@ class PolicyEngine:
         reasons if ANY gate fails.  Returns detailed per-gate results
         with legal basis for explainability.
         """
-        now = at or datetime.now(timezone.utc)
+        now = at or clock.now()
         gate_results: list[GateResult] = []
         violations: list[str] = []
         requires_human = False

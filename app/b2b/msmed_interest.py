@@ -200,7 +200,12 @@ class MsmedInterestCalculator:
 
 
 def _real_today() -> date:
-    """System-clock date. The E.12 demo clock replaces this call site."""
-    from datetime import datetime, timezone
+    """System-clock date driven by the E.12 demo clock when present."""
+    try:
+        from app.core.clock import clock
 
-    return datetime.now(timezone.utc).date()
+        return clock.today()
+    except (ImportError, AttributeError):
+        from datetime import datetime, timezone
+
+        return datetime.now(timezone.utc).date()

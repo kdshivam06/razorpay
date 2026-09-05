@@ -15,17 +15,17 @@ what makes the dashboard honest).
 
 from __future__ import annotations
 
-import dataclasses
 import csv
+import dataclasses
 import io
 import threading
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
 from pathlib import Path
 
+from app.audit.audit_logger import AuditLogger
 from app.audit.decision_trace import DecisionTrace, DecisionTracer
 from app.audit.prevention_log import PreventionLog
-from app.audit.audit_logger import AuditLogger
+from app.core.clock import clock
 from app.core.recovery_case import UpliftSegment
 from app.dashboard.render_guard import guard_response
 from app.executor.human_queue import HumanTaskQueue
@@ -587,7 +587,7 @@ def configure(api: DashboardApi) -> None:
         seen_customers.add(customer)
         for channel in ("sms", "whatsapp", "voice"):
             policy._consent.record_consent(
-                customer, channel, "payment_recovery", datetime.now(timezone.utc)
+                customer, channel, "payment_recovery", clock.now()
             )
 
     configure_inspector(

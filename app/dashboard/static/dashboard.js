@@ -1317,6 +1317,59 @@ async function simulatePaymentLinkPaid() {
   }
 }
 
+function renderClockReadout(data) {
+  const readout = document.getElementById("clockReadout");
+  const consoleEl = document.querySelector(".clock-console");
+  if (!readout) return;
+  if (!data || typeof data.now_utc !== "string") {
+    readout.textContent = "dev endpoint disabled";
+    consoleEl?.classList.add("disabled");
+    return;
+  }
+  readout.textContent = data.overridden
+    ? `pinned · today ${escapeHTML(data.today)}`
+    : `real time · ${escapeHTML(data.today)}`;
+  consoleEl?.classList.toggle("pinned", Boolean(data.overridden));
+}
+
+async function refreshClockState() {
+  try {
+    const res = await fetch("/api/dev/clock");
+    const data = await res.json();
+    renderClockReadout(res.ok ? data : null);
+    return res.ok ? data : null;
+  } catch (err) {
+    renderClockReadout(null);
+    return null;
+  }
+}
+
+async function advanceClock(hours) {
+  try {
+    const res = await fetch(`/api/dev/advance-clock?hours=${encodeURIComponent(hours)}`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error((data && data.detail) || `advance failed (${res.status})`);
+    renderClockReadout(data);
+    return data;
+  } catch (err) {
+    renderClockReadout(null);
+    return null;
+  }
+}
+
+async function resetClock() {
+  try {
+    const res = await fetch("/api/dev/reset-clock", { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error((data && data.detail) || `reset failed (${res.status})`);
+    renderClockReadout(data);
+    return data;
+  } catch (err) {
+    renderClockReadout(null);
+    return null;
+  }
+}
+
 function initControls() {
   document.querySelectorAll(".mode-switch button").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1351,6 +1404,10 @@ function initControls() {
   });
   document.getElementById("uploadButton")?.addEventListener("click", uploadSelectedBatch);
   document.getElementById("syntheticButton")?.addEventListener("click", loadSyntheticBatch);
+
+  document.getElementById("clockPlus1h")?.addEventListener("click", () => { advanceClock(1); });
+  document.getElementById("clockPlus1d")?.addEventListener("click", () => { advanceClock(24); });
+  document.getElementById("clockReset")?.addEventListener("click", resetClock);
   document.getElementById("realtimeButton")?.addEventListener("click", injectRealtimeEvent);
 
   // Modal/drawer controls
@@ -1448,6 +1505,7 @@ async function loadDashboard() {
     renderDatasetProof(state.dataset);
     renderMessages(state.messages);
     renderAnomalies(state.anomalies);
+    refreshClockState();
     document.getElementById("pitchLine").textContent =
       `${state === SAMPLE_STATE ? "Demo seed: " : ""}Recovered ${compactINR(state.wf.incremental_net_recovery_paise)} net incremental value while avoiding ${fmt.format(state.sc.contacts_avoided ?? 0)} unnecessary contacts.`;
     document.getElementById("lastUpdated").textContent = `Updated ${new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
