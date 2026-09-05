@@ -5,7 +5,7 @@ Per §1.2, every decision must capture:
   - Why this intervention (economic score, uplift)
   - Why now (timing rationale)
   - What was rejected and why (§13.4)
-  - What policy checks passed / failed
+  - What policy checks passed / failed (with per-gate detail + legal basis)
   - Was recovery incremental (control group comparison)
 
 Judge can click "WHY DID YOU SEND THIS?" and see everything.
@@ -20,6 +20,17 @@ from datetime import datetime, timezone
 from app.contracts import Action, CandidateAction
 
 logger = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass(frozen=True)
+class PolicyGateDetail:
+    """Per-gate policy evaluation detail with legal basis (§7)."""
+
+    gate_name: str
+    result: str  # "PASS" | "FAIL" | "BLOCKED" | "SKIPPED"
+    reason: str | None
+    legal_basis: str
+    legal_basis_description: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -53,10 +64,13 @@ class DecisionTrace:
     # §1.2: What was rejected and why (§13.4)
     rejected_actions: dict[str, str]  # action_value → reason
 
-    # §1.2: What policy checks passed/failed
+    # §1.2: What policy checks passed/failed (legacy flat lists)
     policy_checks_passed: list[str]
     policy_checks_failed: list[str]
     policy_gate_result: str  # APPROVED / BLOCKED
+
+    # §1.2 + §7: Detailed per-gate policy evaluation with legal basis
+    policy_gate_details: list[PolicyGateDetail] = dataclasses.field(default_factory=list)
 
     # Execution
     execution_result: str | None = None
@@ -101,11 +115,14 @@ class DecisionTracer:
         policy_checks_passed: list[str] | None = None,
         policy_checks_failed: list[str] | None = None,
         policy_gate_result: str = "APPROVED",
+        policy_gate_details: list[PolicyGateDetail] | None = None,
         execution_result: str | None = None,
         execution_detail: str | None = None,
         idempotency_key: str | None = None,
         is_incremental: bool = False,
         control_group: bool = False,
+        outcome: str | None = None,
+        outcome_amount_paise: int | None = None,
         model_versions: dict | None = None,
     ) -> DecisionTrace:
         """Build a complete decision trace and store it."""
@@ -127,11 +144,14 @@ class DecisionTracer:
             policy_checks_passed=policy_checks_passed or [],
             policy_checks_failed=policy_checks_failed or [],
             policy_gate_result=policy_gate_result,
+            policy_gate_details=policy_gate_details or [],
             execution_result=execution_result,
             execution_detail=execution_detail,
             idempotency_key=idempotency_key,
             is_incremental=is_incremental,
             control_group=control_group,
+            outcome=outcome,
+            outcome_amount_paise=outcome_amount_paise,
             model_versions=model_versions or {},
         )
 

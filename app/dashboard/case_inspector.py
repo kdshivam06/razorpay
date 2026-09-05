@@ -45,8 +45,10 @@ class DiagnosisData:
 class PolicyGate:
     """One structured policy gate result (§7.1, Track C)."""
     gate_name: str
-    result: str  # "PASS" | "FAIL"
+    result: str  # "PASS" | "FAIL" | "BLOCKED" | "SKIPPED"
     reason: str | None
+    legal_basis: str | None
+    legal_basis_description: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -241,19 +243,35 @@ class CaseInspector:
         return label_map.get(root_cause.lower(), "Unknown")
 
     def _build_policy_gates(self, trace: DecisionTrace) -> list[PolicyGate]:
-        """Build structured policy gates from trace data.
+        """Build structured policy gates from trace's detailed policy_gate_details.
         
-        Note: Full structured policy_gates come in E.6. For now, derive
-        from the trace's passed/failed checks.
+        Uses the per-gate results with legal basis stored in trace.policy_gate_details
+        (populated by PolicyEngine.evaluate). Falls back to legacy passed/failed lists
+        if details are not available.
         """
         gates = []
         
+        # Use detailed gate results if available (Track E.3)
+        if trace.policy_gate_details:
+            for detail in trace.policy_gate_details:
+                gates.append(PolicyGate(
+                    gate_name=detail.gate_name,
+                    result=detail.result,
+                    reason=detail.reason,
+                    legal_basis=detail.legal_basis,
+                    legal_basis_description=detail.legal_basis_description,
+                ))
+            return gates
+        
+        # Fallback: derive from legacy flat lists (backward compatibility)
         # Map trace's policy_checks_passed to PASS gates
         for check in trace.policy_checks_passed:
             gates.append(PolicyGate(
                 gate_name=check,
                 result="PASS",
                 reason=None,
+                legal_basis=None,
+                legal_basis_description=None,
             ))
         
         # Map trace's policy_checks_failed to FAIL gates
@@ -262,6 +280,8 @@ class CaseInspector:
                 gate_name=check,
                 result="FAIL",
                 reason=f"Policy gate '{check}' blocked the action",
+                legal_basis=None,
+                legal_basis_description=None,
             ))
         
         # If no gates in trace, provide placeholder
@@ -270,6 +290,8 @@ class CaseInspector:
                 gate_name="pending_structured_gates",
                 result="UNKNOWN",
                 reason="Structured policy gate evaluation coming in E.6",
+                legal_basis=None,
+                legal_basis_description=None,
             ))
         
         return gates
@@ -374,6 +396,8 @@ def packet_to_dict(packet: DecisionPacket) -> dict[str, Any]:
                 "gate_name": gate.gate_name,
                 "result": gate.result,
                 "reason": gate.reason,
+                "legal_basis": gate.legal_basis,
+                "legal_basis_description": gate.legal_basis_description,
             }
             for gate in packet.policy_gates
         ] or [_pending("E.6 — structured policy gate evaluation")],

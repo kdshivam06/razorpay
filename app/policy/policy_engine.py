@@ -35,8 +35,20 @@ from app.policy.customer_preferences import CustomerPreferenceEngine
 from app.policy.fraud_detector import FraudDetector
 from app.policy.platform_awareness import PlatformAwareness
 from app.policy.reversibility import ReversibilityScorer
+from app.policy.legal_basis import get_legal_basis
 
 logger = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass(frozen=True)
+class GateResult:
+    """Per-gate evaluation result with legal basis."""
+
+    gate_name: str
+    result: str  # "PASS" | "FAIL" | "BLOCKED" | "SKIPPED"
+    reason: str | None
+    legal_basis: str
+    legal_basis_description: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -45,12 +57,23 @@ class PolicyEvaluation:
 
     action: Action
     result: PolicyGateResult
-    passed_checks: tuple[str, ...]
-    failed_checks: tuple[str, ...]
-    blocked_reasons: tuple[str, ...]
+    gate_results: tuple[GateResult, ...]
     violations: tuple[str, ...] = ()
     human_approval_required: bool = False
     hold_until: datetime | None = None
+
+    # Convenience properties for backward compatibility
+    @property
+    def passed_checks(self) -> tuple[str, ...]:
+        return tuple(gr.gate_name for gr in self.gate_results if gr.result == "PASS")
+
+    @property
+    def failed_checks(self) -> tuple[str, ...]:
+        return tuple(gr.gate_name for gr in self.gate_results if gr.result in {"FAIL", "BLOCKED"})
+
+    @property
+    def blocked_reasons(self) -> tuple[str, ...]:
+        return tuple(gr.reason for gr in self.gate_results if gr.result in {"FAIL", "BLOCKED"} and gr.reason)
 
 
 # Actions that bypass most policy checks (internal/non-outbound)
@@ -64,6 +87,7 @@ _ACTION_TO_CHANNEL: dict[Action, Channel] = {
     Action.SEND_EMAIL: Channel.EMAIL,
     Action.SEND_WHATSAPP: Channel.WHATSAPP,
     Action.VOICE_CALL: Channel.VOICE,
+    Action.SEND_PAYMENT_LINK: Channel.SMS,  # Payment links sent via SMS
 }
 
 # Actions that are "outbound communication" — subject to consent, window, cooldown
@@ -128,24 +152,47 @@ class PolicyEngine:
         """Run the full gate chain for a (case, action) pair.
 
         Returns APPROVED only if ALL gates pass.  Returns BLOCKED with
-        reasons if ANY gate fails.
+        reasons if ANY gate fails.  Returns detailed per-gate results
+        with legal basis for explainability.
         """
         now = at or datetime.now(timezone.utc)
-        passed: list[str] = []
-        failed: list[str] = []
-        blocked_reasons: list[str] = []
+        gate_results: list[GateResult] = []
         violations: list[str] = []
         requires_human = False
         hold_until: datetime | None = None
 
-        # ── Passthrough actions skip most checks ──────────────────
+        # Helper to add a gate result with legal basis
+        def add_gate(gate_name: str, result: str, reason: str | None = None) -> None:
+            legal_basis, description = get_legal_basis(gate_name)
+            gate_results.append(GateResult(
+                gate_name=gate_name,
+                result=result,
+                reason=reason,
+                legal_basis=legal_basis,
+                legal_basis_description=description,
+            ))
+
+        # ── Passthrough actions: add passthrough gate, mark others SKIPPED ──────────────────
         if action in _PASSTHROUGH_ACTIONS:
+            add_gate("passthrough", "PASS", "Internal action — no outbound effect")
+            # Mark all other gates as SKIPPED for completeness
+            for gate_name in ["consent", "contact_window", "customer_preference", "cooldown",
+                             "fraud", "dispute", "reversibility", "blast_radius", "platform_awareness"]:
+                legal_basis, description = get_legal_basis(gate_name)
+                gate_results.append(GateResult(
+                    gate_name=gate_name,
+                    result="SKIPPED",
+                    reason=f"Passthrough action {action.value} — no outbound effect",
+                    legal_basis=legal_basis,
+                    legal_basis_description=description,
+                ))
             return PolicyEvaluation(
                 action=action,
                 result=PolicyGateResult.APPROVED,
-                passed_checks=("passthrough",),
-                failed_checks=(),
-                blocked_reasons=(),
+                gate_results=tuple(gate_results),
+                violations=(),
+                human_approval_required=False,
+                hold_until=None,
             )
 
         # ── Gate 1: Consent (TRAI) — §7.3 ────────────────────────
@@ -156,81 +203,77 @@ class PolicyEngine:
                 case.customer_id, channel_name, "payment_recovery"
             )
             if has_consent:
-                passed.append("consent")
+                add_gate("consent", "PASS", f"TRAI consent granted for {channel_name}/payment_recovery")
             else:
-                failed.append("consent")
-                blocked_reasons.append(
-                    f"no TRAI consent for {channel_name}/payment_recovery"
-                )
+                add_gate("consent", "FAIL", f"No TRAI consent for {channel_name}/payment_recovery")
                 violations.append("TRAI_CONSENT_MISSING")
+        else:
+            add_gate("consent", "SKIPPED", "Not an outbound communication action")
 
         # ── Gate 2: Contact window — §7.2 ────────────────────────
         if action in _OUTBOUND_ACTIONS:
             channel = _ACTION_TO_CHANNEL.get(action)
             if channel:
                 if self._contact.is_contact_allowed(channel, now):
-                    passed.append("contact_window")
+                    add_gate("contact_window", "PASS", f"Within allowed window for {channel.value}")
                 else:
-                    failed.append("contact_window")
                     next_time = self._contact.next_allowed(channel, now)
                     hold_until = next_time
-                    blocked_reasons.append(
-                        f"outside contact window for {channel.value}"
-                        f" — hold until {next_time}"
-                    )
+                    add_gate("contact_window", "FAIL",
+                        f"Outside contact window for {channel.value} — hold until {next_time}")
+            else:
+                add_gate("contact_window", "SKIPPED", "No channel mapping for action")
+        else:
+            add_gate("contact_window", "SKIPPED", "Not an outbound communication action")
 
         # ── Gate 3: Customer preference (DND) — §7.4 ─────────────
         if action in _OUTBOUND_ACTIONS and self._preferences:
             channel = _ACTION_TO_CHANNEL.get(action)
             if channel:
                 if self._preferences.can_contact(case.customer_id, channel.value, now):
-                    passed.append("customer_preference")
+                    add_gate("customer_preference", "PASS", f"Customer prefers {channel.value} at this time")
                 else:
-                    failed.append("customer_preference")
-                    blocked_reasons.append(
-                        f"customer preference blocks {channel.value} at this time"
-                    )
+                    add_gate("customer_preference", "FAIL", f"Customer preference blocks {channel.value} at this time")
+            else:
+                add_gate("customer_preference", "SKIPPED", "No channel mapping for action")
+        else:
+            add_gate("customer_preference", "SKIPPED", "Not an outbound action or preferences engine not configured")
 
         # ── Gate 4: Cooldown — §7.1 ──────────────────────────────
         if action in _OUTBOUND_ACTIONS and self._cooldown:
             channel = _ACTION_TO_CHANNEL.get(action)
             channel_name = channel.value if channel else action.value
             if self._cooldown.within_cooldown(case.customer_id, channel_name):
-                failed.append("cooldown")
                 remaining = self._cooldown.backoff_seconds(
                     case.customer_id, channel_name
                 )
-                blocked_reasons.append(
-                    f"cooldown active for {channel_name}" f" ({remaining}s remaining)"
-                )
+                add_gate("cooldown", "FAIL",
+                    f"Cooldown active for {channel_name} ({remaining}s remaining)")
             else:
-                passed.append("cooldown")
+                add_gate("cooldown", "PASS", f"No cooldown for {channel_name}")
+        else:
+            add_gate("cooldown", "SKIPPED", "Not an outbound action or cooldown manager not configured")
 
         # ── Gate 5: Fraud — §7.1 / §7.7 ──────────────────────────
         fraud_verdict = self._fraud.assess(
             {"fraud_score": case.fraud_score, "dispute_count": 0}
         )
         if not self._fraud.is_action_allowed(fraud_verdict, action):
-            failed.append("fraud")
-            blocked_reasons.append(
-                f"fraud risk {fraud_verdict.risk_level.value}"
-                f" (score={fraud_verdict.fraud_score:.2f})"
-                f" blocks {action.value}"
-            )
+            add_gate("fraud", "FAIL",
+                f"Fraud risk {fraud_verdict.risk_level.value} (score={fraud_verdict.fraud_score:.2f}) blocks {action.value}")
             violations.append("FRAUD_BLOCK")
         else:
-            passed.append("fraud")
+            add_gate("fraud", "PASS", f"Fraud risk {fraud_verdict.risk_level.value} allows {action.value}")
 
         # ── Gate 6: Dispute — §7.1 ───────────────────────────────
         has_dispute = any(
             o.status == ObligationStatus.DISPUTED for o in case.obligations
         )
         if has_dispute and action not in _PASSTHROUGH_ACTIONS:
-            failed.append("dispute")
-            blocked_reasons.append("active dispute — all recovery actions halted")
+            add_gate("dispute", "FAIL", "Active dispute — all recovery actions halted")
             violations.append("ACTIVE_DISPUTE")
         else:
-            passed.append("dispute")
+            add_gate("dispute", "PASS", "No active dispute on obligations")
 
         # ── Gate 7: Reversibility / RBAC — §6.4 / §7.7 ───────────
         amount = case.total_remaining()
@@ -241,60 +284,50 @@ class PolicyEngine:
         )
         if assessment.requires_human_approval:
             requires_human = True
-            # Not a hard block — but flags for human queue
-            passed.append("reversibility")
+            add_gate("reversibility", "PASS",
+                f"Action {action.value} requires human approval (amount={amount}, risk={assessment.impact_level})")
         else:
-            passed.append("reversibility")
+            add_gate("reversibility", "PASS", f"Action {action.value} within autonomy limits")
 
         # ── Gate 8: Blast radius — §7.5 ──────────────────────────
         if action in (_OUTBOUND_ACTIONS | _FINANCIAL_ACTIONS):
             blast = self._blast_radius.check_global_rate(action)
             if blast.circuit_open:
-                failed.append("blast_radius")
-                blocked_reasons.append(
-                    "circuit breaker OPEN — agent rate anomaly detected"
-                )
+                add_gate("blast_radius", "FAIL", "Circuit breaker OPEN — agent rate anomaly detected")
             elif blast.anomalous:
-                failed.append("blast_radius")
-                blocked_reasons.append(
-                    f"rate limit breached: {', '.join(blast.breaches)}"
-                )
+                add_gate("blast_radius", "FAIL", f"Rate limit breached: {', '.join(blast.breaches)}")
             else:
-                passed.append("blast_radius")
+                add_gate("blast_radius", "PASS", "Global rate limits within bounds")
+        else:
+            add_gate("blast_radius", "SKIPPED", "Action not subject to blast radius limits")
 
         # ── Gate 9: Platform awareness — §7.6 ────────────────────
         history = self._platform.history_from_case(case)
         suppress, platform_reason = self._platform.should_suppress(history, action)
         if suppress:
-            failed.append("platform_awareness")
-            blocked_reasons.append(platform_reason)
+            add_gate("platform_awareness", "FAIL", platform_reason)
         else:
-            passed.append("platform_awareness")
+            add_gate("platform_awareness", "PASS", "No platform duplicate action detected")
 
         # ── Final verdict ─────────────────────────────────────────
-        if failed:
-            result = PolicyGateResult.BLOCKED
-        else:
-            result = PolicyGateResult.APPROVED
+        has_failures = any(gr.result in {"FAIL", "BLOCKED"} for gr in gate_results)
+        result = PolicyGateResult.BLOCKED if has_failures else PolicyGateResult.APPROVED
 
         evaluation = PolicyEvaluation(
             action=action,
             result=result,
-            passed_checks=tuple(passed),
-            failed_checks=tuple(failed),
-            blocked_reasons=tuple(blocked_reasons),
+            gate_results=tuple(gate_results),
             violations=tuple(violations),
             human_approval_required=requires_human,
             hold_until=hold_until,
         )
 
         logger.info(
-            "Policy evaluation: case=%s action=%s result=%s passed=%s failed=%s",
+            "Policy evaluation: case=%s action=%s result=%s gates=%s",
             case.case_id,
             action.value,
             result.value,
-            passed,
-            failed,
+            [(gr.gate_name, gr.result) for gr in gate_results],
         )
 
         return evaluation
@@ -319,12 +352,28 @@ class PolicyEngine:
         # Additional autonomy check — large amounts need human
         amount = case.total_remaining()
         if amount >= 50000000 and action in _FINANCIAL_ACTIONS:
+            # Create a new evaluation with human_approval_required=True
+            # Need to add a gate result for the autonomy check
+            from app.policy.legal_basis import get_legal_basis
+            legal_basis, description = get_legal_basis("reversibility")
+            
+            gate_results = list(evaluation.gate_results)
+            # Update reversibility gate to note human approval required
+            gate_results = [
+                gr if gr.gate_name != "reversibility" else GateResult(
+                    gate_name="reversibility",
+                    result="PASS",
+                    reason=f"Action {action.value} requires human approval (high value: {amount})",
+                    legal_basis=legal_basis,
+                    legal_basis_description=description,
+                )
+                for gr in gate_results
+            ]
+            
             return PolicyEvaluation(
                 action=action,
                 result=evaluation.result,
-                passed_checks=evaluation.passed_checks,
-                failed_checks=evaluation.failed_checks,
-                blocked_reasons=evaluation.blocked_reasons,
+                gate_results=tuple(gate_results),
                 violations=evaluation.violations,
                 human_approval_required=True,
                 hold_until=evaluation.hold_until,
