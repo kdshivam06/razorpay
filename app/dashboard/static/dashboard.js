@@ -855,6 +855,16 @@ function renderDecisionPacket(data) {
             <button type="button" class="command-button small ghost action-extra" data-action="WAIT"><i data-lucide="hourglass"></i>Snooze 48h</button>
             <button type="button" class="command-button small danger action-extra" data-action="WRITE_OFF"><i data-lucide="archive"></i>Write Off</button>
           </div>
+          <div class="action-row rzp-link-row">
+            <label class="action-field">
+              <span>Razorpay Payment Link (Test Mode)</span>
+              <div class="rzp-link-buttons">
+                <button type="button" class="command-button small rzp-generate-link"><i data-lucide="link"></i>Generate Razorpay Link</button>
+                <button type="button" class="command-button small ghost rzp-simulate-paid"><i data-lucide="radio-tower"></i>Simulate Paid Webhook</button>
+              </div>
+              <div class="rzp-link-result" id="rzpLinkResult"></div>
+            </label>
+          </div>
           <div class="action-result" id="actionResult"></div>
         </div>
       </article>
@@ -1066,6 +1076,54 @@ async function takeCaseAction(actionEnum) {
   }
 }
 
+async function generateRazorpayLink() {
+  const result = document.getElementById("rzpLinkResult");
+  if (!selectedCaseId || !result) return;
+  result.className = "rzp-link-result";
+  result.textContent = "Creating Razorpay Test Mode link…";
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(selectedCaseId)}/payment-link`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actor: (actionPanelFields().actor || "ops.payment_link") }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error((data && data.detail) || `payment link failed (${res.status})`);
+    const href = data.payment_url || data.short_url;
+    result.innerHTML = `
+      <a class="rzp-link-url" href="${escapeHTML(href)}" target="_blank" rel="noopener noreferrer">Pay via Razorpay Test Link</a>
+      <span class="rzp-link-meta">${escapeHTML(data.link_id || "")} · ${escapeHTML(data.source || "")} · ${compactINR(data.amount_paise)} · ${escapeHTML(data.short_url || "")}</span>`;
+    result.classList.add("success");
+  } catch (err) {
+    result.classList.add("error");
+    result.textContent = `Failed: ${err.message}`;
+  }
+}
+
+async function simulatePaymentLinkPaid() {
+  const result = document.getElementById("rzpLinkResult");
+  if (!selectedCaseId || !result) return;
+  result.className = "rzp-link-result";
+  result.textContent = "Delivering signed payment_link.paid webhook to /webhooks…";
+  try {
+    const res = await fetch(`/api/dev/simulate-webhook/payment-link-paid`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ case_id: selectedCaseId, actor: (actionPanelFields().actor || "dev.simulator") }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error((data && data.detail) || `simulate failed (${res.status})`);
+    const ok = data.status === "accepted";
+    result.innerHTML = `
+      <span class="rzp-link-state ${ok ? "ok" : "warn"}">${ok ? "LINK PAID &amp; RECONCILED ✓" : escapeHTML(data.status || "")}</span>
+      <span class="rzp-link-meta">${escapeHTML(data.payment_link_id || "")} · ${escapeHTML(data.link_state || "")} · event ${escapeHTML(data.event_id || "")} · pay ${escapeHTML(data.payment_id || "")}</span>`;
+    result.classList.add(ok ? "success" : "error");
+  } catch (err) {
+    result.classList.add("error");
+    result.textContent = `Failed: ${err.message}`;
+  }
+}
+
 function initControls() {
   document.querySelectorAll(".mode-switch button").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1140,6 +1198,10 @@ function initControls() {
     }
     const extraBtn = e.target.closest(".action-extra");
     if (extraBtn) takeCaseAction(extraBtn.dataset.action);
+    const rzpLinkBtn = e.target.closest(".rzp-generate-link");
+    if (rzpLinkBtn) generateRazorpayLink();
+    const rzpSimulateBtn = e.target.closest(".rzp-simulate-paid");
+    if (rzpSimulateBtn) simulatePaymentLinkPaid();
   });
 }
 

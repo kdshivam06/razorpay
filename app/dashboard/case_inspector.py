@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import os
 import uuid
 from pathlib import Path
 from typing import Any
@@ -18,18 +19,34 @@ from typing import Any
 from app.audit.audit_logger import AuditLogger
 from app.audit.decision_trace import DecisionTrace, DecisionTracer
 from app.audit.prevention_log import PreventionLog
-from app.contracts import Action, ExecutionState, PolicyGateResult
+from app.config import get_settings
+from app.contracts import (
+    Action,
+    ExecutionState,
+    PaymentLinkState,
+    PolicyGateResult,
+)
 from app.core.obligation import Obligation
 from app.core.recovery_case import RecoveryCase
 from app.dashboard.render_guard import guard_response
 from app.executor.human_queue import HumanTask, HumanTaskQueue, priority_for
 from app.executor.notification import NotificationRecord, NotificationSender
+from app.executor.payment_link import (
+    PaymentLinkGatewayError,
+    PaymentLinkLifecycle,
+    PaymentLinkRecord,
+    RazorpayPaymentLinkClient,
+)
 from app.executor.voice_agent import (
     DEFAULT_TTS_VOICE,
     VoiceNudge,
     VoiceRecovery,
     VoiceSynthesis,
     VoiceSynthesisError,
+)
+from app.ingestion.webhook_simulator import (
+    build_payment_link_paid_event,
+    encode_event,
 )
 from app.nlp.message_templates import (
     CHANNELS,
@@ -141,6 +158,8 @@ class CaseInspector:
         voice_synthesis: VoiceSynthesis | None = None,
         voice_save_dir: str | Path | None = None,
         human_queue: HumanTaskQueue | None = None,
+        payment_links: PaymentLinkLifecycle | None = None,
+        razorpay_client: RazorpayPaymentLinkClient | None = None,
     ) -> None:
         self._tracer = tracer or DecisionTracer()
         self._audit = audit or AuditLogger()
@@ -157,6 +176,8 @@ class CaseInspector:
         self._voice_nudges: dict[str, VoiceNudge] = {}
         self._voice_save_dir = Path(voice_save_dir) if voice_save_dir is not None else None
         self._human_queue = human_queue or HumanTaskQueue()
+        self._payment_links = payment_links or PaymentLinkLifecycle()
+        self._razorpay_client = razorpay_client or RazorpayPaymentLinkClient()
 
     def build_packet(self, case_id: str) -> DecisionPacket | None:
         """Build the full decision packet for a case."""
@@ -750,6 +771,153 @@ class CaseInspector:
             hold_until=hold_until,
         )
 
+    # ── Razorpay Payment Links (E.9) ───────────────────────────────
+
+    def generate_payment_link(
+        self,
+        case_id: str,
+        *,
+        amount_paise: int | None = None,
+        actor: str = "ops.payment_link",
+    ) -> PaymentLinkRecord:
+        """Generate a Razorpay Test Mode payment link for the case (E.9).
+
+        Real keys in app.config → a real `payment_link.create` API call
+        (Test Mode); otherwise a mock link with a demo URL. §8.4 lifecycle
+        applies: an existing active link that covers the amount is reused,
+        an expired one is replaced. A new decision audit entry records the
+        generated link.
+        """
+        trace = self._tracer.latest_trace(case_id)
+        if trace is None:
+            raise KeyError(f"No decision packet for case_id={case_id}")
+
+        case = self._reconstruct_case(trace)
+        amount = amount_paise if (amount_paise or 0) > 0 else case.total_remaining()
+
+        record = self._payment_links.create_or_reuse(
+            case_id, amount, gateway=self._razorpay_client
+        )
+        self._audit.append(
+            trigger_type="PAYMENT_LINK_GENERATED",
+            trigger_event=f"razorpay_link:{record.link_id}",
+            payload={
+                "actor": actor,
+                "link_id": record.link_id,
+                "amount_paise": amount,
+                "currency": "INR",
+                "source": "real" if record.razorpay_link_id else "mock",
+            },
+            case_id=case_id,
+            action=Action.SEND_PAYMENT_LINK.value,
+            amount_paise=amount,
+            actor=actor,
+            link_id=record.link_id,
+            razorpay_link_id=record.razorpay_link_id,
+            short_url=record.short_url,
+            payment_url=record.payment_url,
+            source="real" if record.razorpay_link_id else "mock",
+            lifecycle_state=record.state.value,
+        )
+        return record
+
+    def simulate_payment_link_paid(
+        self,
+        case_id: str,
+        *,
+        actor: str = "dev.simulator",
+    ) -> dict:
+        """Dev-only (ENVIRONMENT=development): deliver a signed paid webhook.
+
+        Builds a Razorpay-shaped `payment_link.paid` event for this case's
+        newest payment link, HMAC-SHA256 signs it with the shared webhook
+        secret, and POSTs it to the app's OWN /webhooks gateway — so it is
+        verified, freshness-checked and deduplicated exactly like a real
+        webhook. On acceptance the link is closed PAID and the reconciliation
+        is written to the audit trail (link created → paid → reconciled).
+        """
+        if not _is_development():
+            raise PermissionError(
+                "Simulated webhooks are dev-only (ENVIRONMENT=development)"
+            )
+        record = self._payment_links.latest(case_id)
+        if record is None:
+            raise KeyError(f"No payment link generated for case_id={case_id}")
+        if record.state is PaymentLinkState.PAID:
+            raise ValueError(
+                f"Payment link {record.link_id} is already PAID — nothing to reconcile"
+            )
+
+        event = build_payment_link_paid_event(
+            link_id=record.link_id,
+            case_id=case_id,
+            amount_paise=record.amount_outstanding_paise,
+            short_url=record.short_url,
+        )
+        body, signature = encode_event(event, secret=self._resolve_webhook_secret())
+        payment_id = event["payload"]["payment"]["entity"]["id"]
+
+        from fastapi.testclient import TestClient
+
+        from app.main import app as _app
+
+        resp = TestClient(_app).post(
+            "/webhooks",
+            content=body,
+            headers={"x-razorpay-signature": signature},
+        )
+        result = resp.json()
+        accepted = resp.status_code == 200 and result.get("status") == "accepted"
+
+        if accepted:
+            self._payment_links.mark_paid(
+                case_id,
+                record.link_id,
+                amount_paid_paise=record.amount_outstanding_paise,
+            )
+            self._audit.append(
+                trigger_type="PAYMENT_LINK_PAID",
+                trigger_event=f"payment_link.paid:{record.link_id}",
+                payload={
+                    "actor": actor,
+                    "event_id": result.get("event_id"),
+                    "payment_id": payment_id,
+                    "link_id": record.link_id,
+                    "amount_paise": record.amount_outstanding_paise,
+                    "payment_state": "captured",
+                    "reconciled": True,
+                },
+                case_id=case_id,
+                action=Action.SEND_PAYMENT_LINK.value,
+                amount_paise=record.amount_outstanding_paise,
+                actor=actor,
+                event_id=result.get("event_id"),
+                payment_id=payment_id,
+                link_id=record.link_id,
+                payment_state="captured",
+                reconciled=True,
+            )
+
+        return {
+            "status": result.get("status") or resp.status_code,
+            "case_id": case_id,
+            "payment_link_id": record.link_id,
+            "event_id": result.get("event_id"),
+            "payment_id": payment_id,
+            "link_state": "PAID" if accepted else record.state.value,
+            "webhook_status_code": resp.status_code,
+            "detail": (
+                "link accepted, marked PAID and reconciled (settled)"
+                if accepted
+                else result
+            ),
+        }
+
+    @staticmethod
+    def _resolve_webhook_secret() -> str:
+        """The same WEBHOOK_SECRET the /webhooks gateway verifies with."""
+        return get_settings().WEBHOOK_SECRET
+
 
 def _pending(step: str) -> dict[str, str]:
     """Create a pending marker dict for fields not yet populated."""
@@ -840,6 +1008,8 @@ def configure(
     voice_synthesis: VoiceSynthesis | None = None,
     voice_save_dir: str | Path | None = None,
     human_queue: HumanTaskQueue | None = None,
+    payment_links: PaymentLinkLifecycle | None = None,
+    razorpay_client: RazorpayPaymentLinkClient | None = None,
 ) -> None:
     """Bind the case inspector to the SAME populated components the recovery run used."""
     global _inspector
@@ -858,6 +1028,8 @@ def configure(
         voice_synthesis=voice_synthesis,
         voice_save_dir=voice_save_dir,
         human_queue=human_queue,
+        payment_links=payment_links,
+        razorpay_client=razorpay_client,
     )
 
 
@@ -870,6 +1042,18 @@ def _get_inspector() -> CaseInspector:
             # Fallback to empty instances — should be overridden by demo bootstrap
             _inspector = CaseInspector()
     return _inspector
+
+
+def _is_development() -> bool:
+    """Dev-only gate for simulated webhooks (E.9).
+
+    Honors ENVIRONMENT first (dev/demo override), then falls back to the
+    APP_ENV setting so existing deployments keep working.
+    """
+    env = os.getenv("ENVIRONMENT") or ""
+    if env:
+        return env.strip().lower() == "development"
+    return (get_settings().APP_ENV or "").strip().lower() == "development"
 
 
 @router.get("/api/cases/{case_id}/decision-packet")
@@ -1048,3 +1232,93 @@ def get_voice_nudge_audio(case_id: str, nudge_id: str) -> Response:
         media_type="audio/wav",
         headers={"Cache-Control": "no-store"},
     )
+
+
+@router.post("/api/cases/{case_id}/payment-link")
+async def generate_payment_link(case_id: str, request: Request) -> dict[str, Any]:
+    """Generate a Razorpay Test Mode payment link for the case (E.9).
+
+    With real keys in app.config this makes a REAL `payment_link.create` API
+    call and returns the razorpay.com/payment-link/... test URL plus the
+    rzp.io short URL for sharing. A Gateway error (timeout/API) returns 502
+    — a timeout is UNKNOWN and must route to reconciliation (§3.5).
+    """
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Request body must be JSON") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Request body must be an object")
+
+    amount = payload.get("amount_paise")
+    actor = str(payload.get("actor") or "ops.payment_link")
+
+    inspector = _get_inspector()
+    try:
+        record = inspector.generate_payment_link(
+            case_id,
+            amount_paise=int(amount) if isinstance(amount, int) else None,
+            actor=actor,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PaymentLinkGatewayError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Razorpay payment link creation failed ({exc.kind}): {exc.reason}",
+        ) from exc
+
+    data = {
+        "case_id": case_id,
+        "link_id": record.link_id,
+        "razorpay_link_id": record.razorpay_link_id,
+        "state": record.state.value,
+        "short_url": record.short_url,
+        "payment_url": record.payment_url,
+        "amount_paise": record.amount_outstanding_paise,
+        "currency": "INR",
+        "source": "real" if record.razorpay_link_id else "mock",
+        "expires_at_ts": record.expires_at_ts,
+    }
+    return guard_response(data, f"payment_link:{case_id}").data
+
+
+@router.post("/api/dev/simulate-webhook/payment-link-paid")
+async def simulate_payment_link_paid(request: Request) -> dict[str, Any]:
+    """E.9 dev-only demo: deliver a correctly signed `payment_link.paid` webhook.
+
+    Gated on ENVIRONMENT=development (or APP_ENV). Builds a Razorpay-shaped
+    event for the case's newest payment link, signs it with the shared
+    WEBHOOK_SECRET, and POSTs it to /webhooks — the app's own production
+    gateway (verify → freshness → dedup). On acceptance the link is closed
+    PAID and the payout reconciled, closing the created → paid → reconciled
+    loop with a click. Returns 404 when not in development.
+
+    Body: {"case_id": "...", "actor": "..."}
+    """
+    if not _is_development():
+        raise HTTPException(
+            status_code=404,
+            detail="Dev-only endpoint — not enabled outside ENVIRONMENT=development",
+        )
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001 - optional body; empty payload is valid
+        payload = {}
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Request body must be an object")
+
+    case_id = str(payload.get("case_id") or "")
+    if not case_id:
+        raise HTTPException(status_code=400, detail="Missing required field: case_id")
+    actor = str(payload.get("actor") or "dev.simulator")
+
+    inspector = _get_inspector()
+    try:
+        result = inspector.simulate_payment_link_paid(case_id, actor=actor)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return guard_response(result, f"simulate_webhook:{case_id}").data

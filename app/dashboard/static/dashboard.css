@@ -1930,6 +1930,69 @@ button.attack:disabled {
   }
 }
 
+/* Razorpay Payment Link (E.9) */
+.rzp-link-row {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.rzp-link-row .action-field {
+  grid-column: 1 / -1;
+}
+.rzp-link-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+.rzp-generate-link {
+  background: var(--emerald, #10b981);
+  color: #fff;
+}
+.rzp-simulate-paid {
+  color: var(--muted);
+}
+.rzp-link-result {
+  min-height: 20px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rzp-link-result.success {
+  color: var(--emerald-strong, #0f766e);
+  border-color: currentColor;
+}
+.rzp-link-result.error {
+  color: var(--danger, #b23b2e);
+  border-color: currentColor;
+}
+.rzp-link-url {
+  font-weight: 700;
+  color: var(--emerald-strong, #0f766e);
+  text-decoration: none;
+}
+.rzp-link-url:hover {
+  text-decoration: underline;
+}
+.rzp-link-meta {
+  font-size: 11px;
+  word-break: break-all;
+}
+.rzp-link-state {
+  font-weight: 700;
+}
+.rzp-link-state.ok {
+  color: var(--emerald-strong, #0f766e);
+}
+.rzp-link-state.warn {
+  color: var(--amber, #d97706);
+}
+
 .chip-high {
   color: #9b2f25;
   background: var(--coral-soft);
