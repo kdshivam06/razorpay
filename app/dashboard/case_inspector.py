@@ -139,7 +139,7 @@ class CaseInspector:
             fault_attribution=trace.root_cause or None,
             taxonomy_code=self._map_root_cause_to_taxonomy(trace.root_cause),
             taxonomy_label=self._map_root_cause_to_label(trace.root_cause),
-            rationale_text=None,  # E.3 - pending
+            rationale_text=trace.diagnostic_rationale or None,
         )
 
         # Build structured policy gates from the trace's policy checks

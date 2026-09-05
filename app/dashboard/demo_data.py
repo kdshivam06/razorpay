@@ -130,6 +130,11 @@ def build_dashboard_from_rows(
                 policy_checks_failed=policy_failed,
                 policy_gate_result=policy_result,
                 policy_gate_details=_build_policy_gate_details(normalized, segment, selected_action, policy_failed),
+                diagnostic_rationale=_build_diagnostic_rationale(
+                    str(normalized.get("failure_reason", "")),
+                    str(normalized.get("root_cause") or normalized.get("failure_reason")),
+                    str(normalized.get("decline_code", "")),
+                ),
                 execution_result="SUCCESS" if selected_action and not policy_failed else None,
                 execution_detail="Dataset-backed synthetic demo; no external side effect.",
                 idempotency_key=f"demo_{case_id}",
@@ -416,6 +421,32 @@ def _policy_failures(
     if segment == "SLEEPING_DOG" and selected_action is not None:
         return ["sleeping dog: intervention may reduce payment probability"]
     return []
+
+
+def _build_diagnostic_rationale(failure_reason: str, root_cause: str, decline_code: str = "") -> str:
+    """Generate a deterministic diagnostic rationale for demo data.
+    
+    In production, this would come from the LLM. For demo purposes, we generate
+    a plausible explanation based on the failure reason and root cause.
+    """
+    rationales = {
+        "insufficient_funds": "The failure reason indicates the customer's account had insufficient balance at the time of the payment attempt.",
+        "expired_card": "The payment method on file has expired, preventing the transaction from being processed.",
+        "bank_timeout": "The bank did not respond within the expected time window, causing the transaction to time out.",
+        "gateway_error": "A temporary gateway or network error occurred during payment processing.",
+        "checkout_abandoned": "The customer initiated checkout but did not complete the payment within the session window.",
+        "mandate_failure": "The mandate was revoked or failed due to bank/customer action, preventing automatic debit.",
+        "overdue_invoice": "The invoice has passed its due date without payment, triggering the recovery workflow.",
+        "dispute": "The customer has filed a formal dispute against this transaction.",
+        "risk_block": "The transaction was blocked by risk systems due to suspicious patterns.",
+        "ptp_broken": "The customer promised to pay by a specific date but did not fulfill the commitment.",
+    }
+    
+    base = rationales.get(failure_reason, f"The failure reason '{failure_reason}' maps to root cause '{root_cause}' based on deterministic classification rules.")
+    
+    if decline_code and decline_code != "N/A":
+        return f"{base} Decline code: {decline_code}."
+    return base
 
 
 def _build_policy_gate_details(

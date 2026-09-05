@@ -64,13 +64,16 @@ class DecisionTrace:
     # §1.2: What was rejected and why (§13.4)
     rejected_actions: dict[str, str]  # action_value → reason
 
-    # §1.2: What policy checks passed/failed (legacy flat lists)
+    # §1.2: What policy checks passed/failed
     policy_checks_passed: list[str]
     policy_checks_failed: list[str]
     policy_gate_result: str  # APPROVED / BLOCKED
 
     # §1.2 + §7: Detailed per-gate policy evaluation with legal basis
     policy_gate_details: list[PolicyGateDetail] = dataclasses.field(default_factory=list)
+
+    # §E.4: LLM-generated diagnostic rationale (generated once after classification)
+    diagnostic_rationale: str = ""
 
     # Execution
     execution_result: str | None = None
@@ -116,6 +119,7 @@ class DecisionTracer:
         policy_checks_failed: list[str] | None = None,
         policy_gate_result: str = "APPROVED",
         policy_gate_details: list[PolicyGateDetail] | None = None,
+        diagnostic_rationale: str = "",
         execution_result: str | None = None,
         execution_detail: str | None = None,
         idempotency_key: str | None = None,
@@ -145,6 +149,7 @@ class DecisionTracer:
             policy_checks_failed=policy_checks_failed or [],
             policy_gate_result=policy_gate_result,
             policy_gate_details=policy_gate_details or [],
+            diagnostic_rationale=diagnostic_rationale,
             execution_result=execution_result,
             execution_detail=execution_detail,
             idempotency_key=idempotency_key,

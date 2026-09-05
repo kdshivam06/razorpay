@@ -33,6 +33,9 @@ class RecoveryCase:
     best_action: str = ""
     uplift_segment: UpliftSegment | str = ""
 
+    # LLM-generated diagnostic rationale (populated once after classification)
+    diagnostic_rationale: str = ""
+
     communications: list[dict] = field(default_factory=list)
     payment_links: list[dict] = field(default_factory=list)
     ptps: list[dict] = field(default_factory=list)
