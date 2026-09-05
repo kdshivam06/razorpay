@@ -110,6 +110,8 @@ def build_dashboard_from_rows(
             if selected_action and not policy_failed:
                 _send_demo_message(notifications, normalized, selected_action, amount)
 
+            pg_details, requires_human = _build_policy_gate_details(normalized, segment, selected_action, policy_failed)
+
             tracer.build(
                 case_id=case_id,
                 trigger_event=str(normalized.get("event_type") or "synthetic_batch"),
@@ -129,7 +131,7 @@ def build_dashboard_from_rows(
                 else ["idempotency"],
                 policy_checks_failed=policy_failed,
                 policy_gate_result=policy_result,
-                policy_gate_details=_build_policy_gate_details(normalized, segment, selected_action, policy_failed),
+                policy_gate_details=pg_details,
                 diagnostic_rationale=_build_diagnostic_rationale(
                     str(normalized.get("failure_reason", "")),
                     str(normalized.get("root_cause") or normalized.get("failure_reason")),
@@ -147,6 +149,8 @@ def build_dashboard_from_rows(
                     "uplift_model_version": "uplift_v1",
                     "dataset": "synthetic_batch.csv",
                 },
+                requires_human_approval=requires_human,
+                reasoning=_build_action_reasoning(segment, selected_action, amount, natural, best),
             )
 
     dataset_summary = {
@@ -638,7 +642,86 @@ def _build_policy_gate_details(
             legal_basis=legal_basis, legal_basis_description=description
         ))
     
-    return details
+    return details, requires_human
+
+
+def _build_action_reasoning(
+    segment: str,
+    selected_action: Action | None,
+    amount: int,
+    natural_prob: float,
+    best: CandidateAction | None,
+) -> str:
+    """Build natural-language reasoning for the action choice (E.5)."""
+    if selected_action is None:
+        if segment == "SURE_THING":
+            return f"No intervention needed — customer has high natural payment probability ({natural_prob:.0%}). Intervening would waste contact budget."
+        if segment == "SLEEPING_DOG":
+            return f"Intervention may reduce payment probability for this Sleeping Dog segment. Best to wait."
+        if segment == "LOST_CAUSE":
+            return f"Low natural payment ({natural_prob:.0%}) and low incremental uplift. Contact budget better spent elsewhere."
+        return f"No action has positive incremental value over natural payment ({natural_prob:.0%})."
+
+    if selected_action == Action.NO_ACTION:
+        return f"No action has positive incremental value over natural payment ({natural_prob:.0%})."
+
+    if selected_action == Action.WAIT:
+        return f"Waiting for optimal retry window — predicted best time increases payment probability."
+
+    if selected_action == Action.HUMAN_ESCALATION:
+        return f"Case requires human review — high value or complex situation."
+
+    if selected_action == Action.BLOCK:
+        return f"Recovery blocked — active dispute or fraud risk."
+
+    # For outbound actions, explain the economic rationale
+    uplift = 0.0
+    if best:
+        uplift = best.economic_score
+    uplift_pct = uplift * 100
+    incr_recovery = 0
+    if best:
+        incr_recovery = best.expected_recovery_paise - round(natural_prob * amount)
+    human_note = " Requires human approval." if amount > 10_000_000 else ""
+
+    if selected_action == Action.SEND_PAYMENT_LINK:
+        return (
+            f"Payment link offers highest incremental uplift (+{uplift_pct:.0f}% → "
+            f"₹{incr_recovery/100:,.0f} incremental recovery) for {segment} segment.{human_note}"
+        )
+    if selected_action == Action.SEND_SMS:
+        return (
+            f"SMS provides cost-effective nudge (+{uplift_pct:.0f}% uplift, "
+            f"₹{incr_recovery/100:,.0f} incremental) for {segment} segment.{human_note}"
+        )
+    if selected_action == Action.SEND_WHATSAPP:
+        return (
+            f"WhatsApp preferred channel for this customer (+{uplift_pct:.0f}% uplift, "
+            f"₹{incr_recovery/100:,.0f} incremental).{human_note}"
+        )
+    if selected_action == Action.SEND_EMAIL:
+        return (
+            f"Email provides documented outreach (+{uplift_pct:.0f}% uplift, "
+            f"₹{incr_recovery/100:,.0f} incremental).{human_note}"
+        )
+    if selected_action == Action.VOICE_CALL:
+        return (
+            f"Voice call for high-touch recovery (+{uplift_pct:.0f}% uplift, "
+            f"₹{incr_recovery/100:,.0f} incremental).{human_note}"
+        )
+    if selected_action in {Action.RETRY_SAME_METHOD, Action.RETRY_ALTERNATE_METHOD}:
+        return (
+            f"Retry {selected_action.value.replace('RETRY_', '').lower()} — "
+            f"transient failure with {uplift_pct:.0f}% uplift.{human_note}"
+        )
+    if selected_action == Action.OFFER_PARTIAL_PAYMENT:
+        return f"Partial payment offer for {segment} — customer may pay portion.{human_note}"
+    if selected_action == Action.REQUEST_PAYMENT_METHOD_UPDATE:
+        return f"Payment method update needed — card expired or invalid.{human_note}"
+    if selected_action == Action.CREATE_PTP:
+        return f"Promise-to-pay created based on customer commitment.{human_note}"
+
+    return f"Selected {selected_action.value} for {segment} segment ({uplift_pct:.0f}% uplift).{human_note}"
 
 
 def _needs_human(row: dict[str, str], amount: int, policy_failed: list[str]) -> bool:

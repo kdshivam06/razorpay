@@ -86,6 +86,10 @@ class DecisionTrace:
     outcome: str | None = None
     outcome_amount_paise: int | None = None
 
+    # §E.5: Human approval flag and action reasoning
+    requires_human_approval: bool = False
+    reasoning: str = ""
+
     # Versions
     model_versions: dict = dataclasses.field(default_factory=dict)
 
@@ -128,6 +132,8 @@ class DecisionTracer:
         outcome: str | None = None,
         outcome_amount_paise: int | None = None,
         model_versions: dict | None = None,
+        requires_human_approval: bool = False,
+        reasoning: str = "",
     ) -> DecisionTrace:
         """Build a complete decision trace and store it."""
         trace = DecisionTrace(
@@ -158,6 +164,8 @@ class DecisionTracer:
             outcome=outcome,
             outcome_amount_paise=outcome_amount_paise,
             model_versions=model_versions or {},
+            requires_human_approval=requires_human_approval,
+            reasoning=reasoning,
         )
 
         self._traces.setdefault(case_id, []).append(trace)

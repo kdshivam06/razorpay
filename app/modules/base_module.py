@@ -30,6 +30,7 @@ from app.executor.action_executor import ActionExecutor, ExecutionResult
 from app.optimizer.intervention_optimizer import InterventionOptimizer
 from app.policy.policy_engine import PolicyEngine
 from app.reconciliation.pre_action_check import PreActionReconciler
+from app.revenue_risk.uplift_model import UpliftEstimates
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,36 @@ class BaseRecoveryModule(ABC):
             "amount_paise": case.total_remaining(),
         }
 
+    def _build_uplift_estimates(
+        self, case: RecoveryCase, candidates: list[CandidateAction]
+    ) -> UpliftEstimates:
+        """Project the module's candidates onto an UpliftEstimates.
+
+        The optimizer consumes per-action probability uplift.  We derive a
+        probability-style uplift from each candidate's net economic value
+        (paise) normalised by the remaining balance, so the optimizer can
+        rank and price the actions it re-builds.
+        """
+        baseline = case.natural_pay_probability
+        amount = case.total_remaining() or 1
+        per_action_uplift: dict[Action, float] = {}
+        for candidate in candidates:
+            ratio = max(
+                -0.5,
+                min(0.5, candidate.economic_score / amount),
+            )
+            per_action_uplift[candidate.action] = ratio
+        per_action_probability = {
+            action: max(0.0, min(1.0, baseline + uplift))
+            for action, uplift in per_action_uplift.items()
+        }
+        return UpliftEstimates(
+            baseline_natural_probability=round(baseline, 4),
+            per_action_probability=per_action_probability,
+            per_action_uplift=per_action_uplift,
+            uplift_segment=case.uplift_segment,
+        )
+
     # ── The AI Loop (§1.3) ────────────────────────────────────────
 
     def run(self, case: RecoveryCase) -> RecoveryModuleResult:
@@ -167,9 +198,6 @@ class BaseRecoveryModule(ABC):
             natural_prob,
         )
 
-        # ── Step 5: ESTIMATE INTERVENTION UPLIFT ──────────────────
-        # (Handled inside generate_candidates / optimizer)
-
         # ── Step 6: GENERATE CANDIDATES ───────────────────────────
         candidates = self.generate_candidates(case)
         if not candidates:
@@ -186,41 +214,49 @@ class BaseRecoveryModule(ABC):
             )
 
         # ── Step 7: OPTIMIZE ECONOMIC VALUE ───────────────────────
-        # Sort by economic score descending — best action first
-        ranked = sorted(candidates, key=lambda c: c.economic_score, reverse=True)
+        # Use the intervention optimizer to select the best action.  The
+        # optimizer applies the confidence ladder, fatigue/stopping rules, and
+        # computes requires_human_approval + reasoning (E.5).  The module's
+        # candidates are projected onto the UpliftEstimates the optimizer needs.
+        estimates = self._build_uplift_estimates(case, candidates)
+        recommendation = self._optimizer.optimize(case, estimates)
+        
         logger.debug(
-            "[%s] Step 7: OPTIMIZE — %d candidates ranked. Top: %s (score=%.2f)",
+            "[%s] Step 7: OPTIMIZE — selected %s (score=%.2f, human=%s)",
             self.module_name,
-            len(ranked),
-            ranked[0].action.value,
-            ranked[0].economic_score,
+            recommendation.selected_action.value if recommendation.selected_action else "NONE",
+            recommendation.economic_scores.get(recommendation.selected_action, 0.0),
+            recommendation.requires_human_approval,
         )
 
-        # ── Step 8: APPLY HARD POLICY ─────────────────────────────
-        # Try candidates in ranked order until one passes policy
-        selected: CandidateAction | None = None
-        policy_passed: list[str] = []
-        policy_failed: list[str] = []
-        rejected_reasons: dict[str, str] = {}
-
-        for candidate in ranked:
-            evaluation = self._policy.evaluate(case, candidate.action)
+        # Use the optimizer's selected action and rejected reasons
+        selected_action: Action | None = recommendation.selected_action
+        selected = next(
+            (c for c in candidates if c.action == selected_action), None
+        )
+        rejected_reasons = recommendation.rejected_reasons
+        policy_passed = []
+        policy_failed = []
+        
+        if selected is not None:
+            # Check policy for the selected action
+            evaluation = self._policy.evaluate(case, selected_action)
             if evaluation.result == PolicyGateResult.APPROVED:
-                selected = candidate
                 policy_passed = list(evaluation.passed_checks)
-                break
             else:
-                rejected_reasons[candidate.action.value] = "; ".join(
+                rejected_value = selected_action.value
+                policy_failed = list(evaluation.failed_checks)
+                rejected_reasons[rejected_value] = "; ".join(
                     evaluation.blocked_reasons
                 )
-                policy_failed.extend(evaluation.failed_checks)
                 # Log prevention
                 self._prevention.log(
                     case_id=case.case_id,
-                    prevented_action=candidate.action.value,
+                    prevented_action=rejected_value,
                     reason="; ".join(evaluation.blocked_reasons),
                     amount_saved_paise=case.total_remaining(),
                 )
+                selected = None
 
         if selected is None:
             logger.warning(
@@ -244,6 +280,8 @@ class BaseRecoveryModule(ABC):
                 policy_checks_failed=list(set(policy_failed)),
                 policy_gate_result="BLOCKED",
                 model_versions=self._versions.current().__dict__,
+                requires_human_approval=False,
+                reasoning="All candidates blocked by policy — no automated action permitted.",
             )
             return RecoveryModuleResult(
                 case_id=case.case_id,
@@ -311,7 +349,9 @@ class BaseRecoveryModule(ABC):
             revenue_at_risk_paise=remaining,
             candidate_actions=candidates,
             selected_action=selected.action,
-            selected_economic_score=selected.economic_score,
+            selected_economic_score=recommendation.economic_scores.get(
+                selected.action, selected.economic_score
+            ),
             selection_reasoning=(
                 f"{selected.action.value}: expected_recovery="
                 f"₹{selected.expected_recovery_paise / 100:.0f}, "
@@ -326,6 +366,8 @@ class BaseRecoveryModule(ABC):
             execution_detail=exec_result.detail,
             idempotency_key=exec_result.idempotency_key,
             model_versions=self._versions.current().__dict__,
+            requires_human_approval=recommendation.requires_human_approval,
+            reasoning=recommendation.reasoning,
         )
 
         # Audit log

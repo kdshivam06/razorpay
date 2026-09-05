@@ -413,10 +413,10 @@ class DashboardApi:
         items = []
         for t in self._treatment_traces():
             # Skip if no action selected or stopped
-            if t.selected_action is None or t.stopped:
+            if t.selected_action is None or getattr(t, "stopped", False):
                 continue
-            # Use trace's selection_reasoning as the reasoning
-            reasoning = t.selection_reasoning or "No reasoning recorded."
+            # Use trace's E.5 reasoning field (fall back to selection_reasoning)
+            reasoning = t.reasoning or t.selection_reasoning or "No reasoning recorded."
             # Determine trace_id from audit
             audit_entries = self._audit.entries_for_case(t.case_id)
             trace_id = audit_entries[-1].entry_id if audit_entries else None

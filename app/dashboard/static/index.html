@@ -187,23 +187,44 @@
       </div>
     </section>
 
-    <!-- Case Inspector Modal/Drawer -->
-    <div class="modal-overlay" id="inspectorModal" role="dialog" aria-modal="true" aria-labelledby="inspectorTitle" hidden>
-      <div class="modal-drawer" id="inspectorDrawer">
-        <header class="modal-header">
-          <div>
-            <span class="mini-label" id="inspectorTitle">Decision Packet</span>
-            <h2 id="inspectorCaseId">—</h2>
-          </div>
-          <button type="button" class="icon-button" id="closeInspector" aria-label="Close decision packet">
-            <i data-lucide="x"></i>
-          </button>
-        </header>
-        <div class="modal-body" id="inspectorBody">
-          <div class="loading-placeholder">Loading decision packet…</div>
+    <!-- Action Queue View — Auto-eligible vs Human-required (E.5) -->
+    <section class="surface queue-surface" data-panel="executive guardrails">
+      <div class="surface-header">
+        <div>
+          <p class="eyebrow">Action queue</p>
+          <h2>Auto-Resolve vs Human Review</h2>
+        </div>
+        <div class="segmented" id="queueViewFilters" aria-label="Filter queue view">
+          <button type="button" class="active" data-view="all">All</button>
+          <button type="button" data-view="auto">Auto-Resolve</button>
+          <button type="button" data-view="human">Human Required</button>
         </div>
       </div>
-    </div>
+      <div class="queue-layout">
+        <div class="table-wrap">
+          <table id="queueViewTable">
+            <thead>
+              <tr>
+                <th>Case</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Action</th>
+                <th>Segment</th>
+                <th>Confidence</th>
+                <th>Requires Human</th>
+                <th>Trace</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <aside class="case-inspector" id="queueViewInspector">
+          <span class="mini-label">Selected case</span>
+          <strong>No case selected</strong>
+          <p>Click a row to see recommendation reasoning.</p>
+        </aside>
+      </div>
+    </section>
 
     <section class="surface message-surface" data-panel="executive guardrails">
       <div class="surface-header">

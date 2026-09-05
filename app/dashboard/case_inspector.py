@@ -151,9 +151,9 @@ class CaseInspector:
         # Build recommendation
         recommendation = RecommendationData(
             action=trace.selected_action.value if trace.selected_action else "NO_ACTION",
-            requires_human=self._requires_human(trace),
+            requires_human=trace.requires_human_approval,
             confidence=round(trace.selected_economic_score, 4) if trace.selected_economic_score else 0.0,
-            reasoning=trace.selection_reasoning or None,
+            reasoning=trace.reasoning or trace.selection_reasoning or None,
         )
 
         # Build settlement projection
@@ -296,31 +296,6 @@ class CaseInspector:
             ))
         
         return gates
-
-    def _requires_human(self, trace: DecisionTrace) -> bool:
-        """Determine if the selected action requires human approval."""
-        if not trace.selected_action:
-            return False
-        
-        # High-value financial actions require human
-        high_value_actions = {
-            Action.RETRY_SAME_METHOD,
-            Action.RETRY_ALTERNATE_METHOD,
-            Action.SEND_PAYMENT_LINK,
-            Action.OFFER_PARTIAL_PAYMENT,
-            Action.REQUEST_PAYMENT_METHOD_UPDATE,
-        }
-        
-        if trace.selected_action in high_value_actions:
-            # Check if amount exceeds threshold (₹1L = 10,000,000 paise)
-            if trace.revenue_at_risk_paise >= 10_000_000:
-                return True
-        
-        # Human escalation always requires human
-        if trace.selected_action == Action.HUMAN_ESCALATION:
-            return True
-            
-        return False
 
     def _build_settlement_projection(self, trace: DecisionTrace) -> SettlementProjection:
         """Build settlement projection from trace data."""

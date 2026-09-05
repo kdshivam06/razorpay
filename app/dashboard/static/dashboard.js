@@ -4,6 +4,7 @@ const charts = {};
 let dashboardState = null;
 let selectedQueueFilter = "all";
 let selectedCaseId = null;
+let queueViewFilter = "all";  // "all" | "auto" | "human"
 
 const palette = {
   emerald: "#087f5b",
@@ -87,6 +88,82 @@ const SAMPLE_STATE = {
       action: "BLOCK",
       reason: "Dispute and fraud signals conflict; no automated outreach permitted.",
       amount_paise: 820000,
+    },
+  ],
+  autoQueue: [
+    {
+      case_id: "case_syn_00101",
+      amount_paise: 4500000,
+      status: "OPTIMIZED",
+      recommended_action: "SEND_PAYMENT_LINK",
+      requires_human: false,
+      confidence: 0.72,
+      reasoning: "Payment link offers highest incremental uplift (+42% → ₹1.89L incremental recovery) for PERSUADABLE segment.",
+      uplift_segment: "PERSUADABLE",
+      policy_gate_result: "APPROVED",
+      trace_id: "aud_abc123",
+    },
+    {
+      case_id: "case_syn_00102",
+      amount_paise: 2800000,
+      status: "OPTIMIZED",
+      recommended_action: "SEND_SMS",
+      requires_human: false,
+      confidence: 0.65,
+      reasoning: "SMS provides cost-effective nudge (+28% uplift, ₹78K incremental) for PERSUADABLE segment.",
+      uplift_segment: "PERSUADABLE",
+      policy_gate_result: "APPROVED",
+      trace_id: "aud_def456",
+    },
+    {
+      case_id: "case_syn_00103",
+      amount_paise: 1200000,
+      status: "OPTIMIZED",
+      recommended_action: "SEND_WHATSAPP",
+      requires_human: false,
+      confidence: 0.58,
+      reasoning: "WhatsApp preferred channel for this customer (+31% uplift, ₹37K incremental).",
+      uplift_segment: "PERSUADABLE",
+      policy_gate_result: "APPROVED",
+      trace_id: "aud_ghi789",
+    },
+  ],
+  humanQueue: [
+    {
+      case_id: "case_syn_00201",
+      amount_paise: 15000000,
+      status: "OPTIMIZED",
+      recommended_action: "SEND_PAYMENT_LINK",
+      requires_human: true,
+      confidence: 0.68,
+      reasoning: "Payment link offers highest incremental uplift (+38% → ₹5.7L incremental recovery) for PERSUADABLE segment. Requires human approval.",
+      uplift_segment: "PERSUADABLE",
+      policy_gate_result: "APPROVED",
+      trace_id: "aud_jkl012",
+    },
+    {
+      case_id: "case_syn_00202",
+      amount_paise: 8000000,
+      status: "OPTIMIZED",
+      recommended_action: "OFFER_PARTIAL_PAYMENT",
+      requires_human: true,
+      confidence: 0.62,
+      reasoning: "Partial payment offer for PERSUADABLE segment — customer may pay portion. Requires human approval.",
+      uplift_segment: "PERSUADABLE",
+      policy_gate_result: "APPROVED",
+      trace_id: "aud_mno345",
+    },
+    {
+      case_id: "case_syn_00203",
+      amount_paise: 3400000,
+      status: "RISK_ASSESSED",
+      recommended_action: "HUMAN_ESCALATION",
+      requires_human: true,
+      confidence: 0.55,
+      reasoning: "Case requires human review — high value.",
+      uplift_segment: "LOST_CAUSE",
+      policy_gate_result: "APPROVED",
+      trace_id: "aud_pqr678",
     },
   ],
   dataset: {
@@ -464,6 +541,74 @@ function renderQueue(items) {
   renderInspector(filtered[0]);
 }
 
+function renderQueueView(autoQueue, humanQueue) {
+  const allItems = [
+    ...(autoQueue || []).map(item => ({ ...item, bucket: "auto" })),
+    ...(humanQueue || []).map(item => ({ ...item, bucket: "human" })),
+  ];
+
+  const filtered = queueViewFilter === "all"
+    ? allItems
+    : allItems.filter(item => item.bucket === queueViewFilter);
+
+  const tbody = document.querySelector("#queueViewTable tbody");
+  const inspector = document.getElementById("queueViewInspector");
+
+  if (!filtered.length) {
+    const msg = queueViewFilter === "auto" ? "No auto-resolvable cases" :
+                queueViewFilter === "human" ? "No cases requiring human review" :
+                "No cases in queue";
+    tbody.innerHTML = `<tr class="empty"><td colspan="8">${msg}</td></tr>`;
+    inspector.innerHTML = `
+      <span class="mini-label">Selected case</span>
+      <strong>Queue clear</strong>
+      <p>No cases match the current filter.</p>`;
+    return;
+  }
+
+  tbody.innerHTML = filtered
+    .map(
+      (item, index) => `<tr data-index="${index}" class="${index === 0 ? "selected" : ""}" data-bucket="${item.bucket}">
+        <td>${escapeHTML(item.case_id)}</td>
+        <td>${compactINR(item.amount_paise)}</td>
+        <td><span class="chip ${item.requires_human ? "chip-high" : "chip-low"}">${escapeHTML(item.status || "UNKNOWN")}</span></td>
+        <td><strong>${escapeHTML(item.recommended_action)}</strong></td>
+        <td><span class="chip ${item.uplift_segment === "SURE_THING" ? "chip-low" : item.uplift_segment === "PERSUADABLE" ? "" : item.uplift_segment === "SLEEPING_DOG" ? "chip-high" : ""}">${escapeHTML(item.uplift_segment || "UNKNOWN")}</span></td>
+        <td>${(item.confidence * 100).toFixed(0)}%</td>
+        <td><span class="chip ${item.requires_human ? "chip-high" : "chip-low"}">${item.requires_human ? "Yes" : "No"}</span></td>
+        <td><code>${escapeHTML(item.trace_id || "—")}</code></td>
+      </tr>`
+    )
+    .join("");
+
+  tbody.querySelectorAll("tr").forEach((row) => {
+    row.addEventListener("click", () => {
+      tbody.querySelectorAll("tr").forEach((r) => r.classList.remove("selected"));
+      row.classList.add("selected");
+      renderQueueViewInspector(filtered[Number(row.dataset.index)]);
+    });
+  });
+
+  renderQueueViewInspector(filtered[0]);
+}
+
+function renderQueueViewInspector(item) {
+  document.getElementById("queueViewInspector").innerHTML = `
+    <span class="mini-label">Selected case</span>
+    <strong>${escapeHTML(item.case_id)}</strong>
+    <p>${escapeHTML(item.reasoning || "No reasoning provided.")}</p>
+    <dl>
+      <div><dt>Amount</dt><dd>${compactINR(item.amount_paise)}</dd></div>
+      <div><dt>Status</dt><dd>${escapeHTML(item.status || "UNKNOWN")}</dd></div>
+      <div><dt>Recommended action</dt><dd><strong>${escapeHTML(item.recommended_action)}</strong></dd></div>
+      <div><dt>Uplift segment</dt><dd>${escapeHTML(item.uplift_segment || "UNKNOWN")}</dd></div>
+      <div><dt>Confidence</dt><dd>${(item.confidence * 100).toFixed(0)}%</dd></div>
+      <div><dt>Requires human</dt><dd><span class="chip ${item.requires_human ? "chip-high" : "chip-low"}">${item.requires_human ? "Yes" : "No"}</span></dd></div>
+      <div><dt>Policy gate</dt><dd>${escapeHTML(item.policy_gate_result || "UNKNOWN")}</dd></div>
+      <div><dt>Trace ID</dt><dd><code>${escapeHTML(item.trace_id || "—")}</code></dd></div>
+    </dl>`;
+}
+
 function renderMessages(messages = []) {
   const el = document.getElementById("messageOutbox");
   if (!el) return;
@@ -736,6 +881,15 @@ function initControls() {
     });
   });
 
+  document.querySelectorAll("#queueViewFilters button").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll("#queueViewFilters button").forEach((b) => b.classList.remove("active"));
+      button.classList.add("active");
+      queueViewFilter = button.dataset.view;
+      if (dashboardState) renderQueueView(dashboardState.autoQueue, dashboardState.humanQueue);
+    });
+  });
+
   document.getElementById("refreshButton")?.addEventListener("click", loadDashboard);
   document.getElementById("batchFile")?.addEventListener("change", (event) => {
     const file = event.target.files?.[0];
@@ -769,7 +923,7 @@ async function loadDashboard() {
     refresh?.classList.add("spinning");
     setStatus("", "Syncing");
 
-    const [wf, sc, segs, ca, queue, dataset, messages] = await Promise.all([
+    const [wf, sc, segs, ca, queue, dataset, messages, autoQueue, humanQueue] = await Promise.all([
       getJSON("/api/dashboard/waterfall"),
       getJSON("/api/dashboard/scorecard"),
       getJSON("/api/dashboard/uplift_segments"),
@@ -777,9 +931,11 @@ async function loadDashboard() {
       getJSON("/api/dashboard/exception_queue"),
       getJSON("/api/dashboard/dataset"),
       getJSON("/api/dashboard/messages"),
+      getJSON("/api/queue/auto-eligible"),
+      getJSON("/api/queue/human-required"),
     ]);
 
-    const liveState = { wf, sc, segs, ca, queue, dataset, messages };
+    const liveState = { wf, sc, segs, ca, queue, dataset, messages, autoQueue, humanQueue };
     const state = hasDashboardSignal(liveState) ? liveState : SAMPLE_STATE;
     dashboardState = state;
     if (state === SAMPLE_STATE) {
@@ -791,6 +947,7 @@ async function loadDashboard() {
     renderSegments(state.segs);
     renderContacts(state.ca);
     renderQueue(state.queue);
+    renderQueueView(state.autoQueue, state.humanQueue);
     renderDatasetProof(state.dataset);
     renderMessages(state.messages);
     document.getElementById("pitchLine").textContent =

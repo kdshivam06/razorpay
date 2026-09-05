@@ -95,6 +95,8 @@ class TestDecisionPacketAPI:
             control_group=False,
             outcome="RECOVERED",
             outcome_amount_paise=15000000,
+            requires_human_approval=True,
+            reasoning="Payment link has highest positive incremental recovery (+45%) for Persuadable segment. Requires human approval.",
             model_versions={
                 "classifier_version": "classifier_v1",
                 "propensity_model_version": "propensity_v1",
@@ -204,7 +206,7 @@ class TestDecisionPacketAPI:
         rec = data["recommendation"]
         assert rec["action"] == "SEND_PAYMENT_LINK"
         assert rec["confidence"] == 0.45
-        assert rec["reasoning"] == "Payment link has highest positive incremental recovery (+45%) for Persuadable segment"
+        assert rec["reasoning"] == "Payment link has highest positive incremental recovery (+45%) for Persuadable segment. Requires human approval."
         # requires_human is True for high-value payment link (>₹1L)
         assert rec["requires_human"] is True
 
