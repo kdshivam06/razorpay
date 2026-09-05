@@ -20,6 +20,7 @@ from app.contracts import Action, CandidateAction
 from app.dashboard.api import DashboardApi
 from app.executor.human_queue import HumanTask, HumanTaskQueue, priority_for
 from app.executor.notification import NotificationSender
+from app.nlp.model_router import PARSED_BY_DETERMINISTIC
 from app.policy.legal_basis import get_legal_basis
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -168,6 +169,7 @@ def build_dashboard_from_rows(
                 },
                 requires_human_approval=requires_human,
                 reasoning=_build_action_reasoning(segment, selected_action, amount, natural, best),
+                parsed_by_model=PARSED_BY_DETERMINISTIC,
             )
 
     dataset_summary = {

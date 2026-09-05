@@ -19,6 +19,7 @@ from datetime import datetime
 
 from app.contracts import Action, CandidateAction
 from app.core.clock import clock
+from app.nlp.model_router import PARSED_BY_DETERMINISTIC
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,9 @@ class DecisionTrace:
     # §1.2: one-paragraph "why this case is here" (E.13) / E.10 narrative
     case_narrative: str = ""
 
+    # Track F.1: which model path actually produced this decision's signal parse
+    parsed_by_model: str = PARSED_BY_DETERMINISTIC
+
     # Versions
     model_versions: dict = dataclasses.field(default_factory=dict)
 
@@ -139,6 +143,7 @@ class DecisionTracer:
         requires_human_approval: bool = False,
         reasoning: str = "",
         case_narrative: str = "",
+        parsed_by_model: str = PARSED_BY_DETERMINISTIC,
     ) -> DecisionTrace:
         """Build a complete decision trace and store it."""
         trace = DecisionTrace(
@@ -172,6 +177,7 @@ class DecisionTracer:
             requires_human_approval=requires_human_approval,
             reasoning=reasoning,
             case_narrative=case_narrative,
+            parsed_by_model=parsed_by_model,
         )
 
         self._traces.setdefault(case_id, []).append(trace)

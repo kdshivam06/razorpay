@@ -14,6 +14,11 @@ from app.classifier.rules_engine import RulesEngine
 from app.contracts import RootCause
 from app.core.recovery_case import RecoveryCase
 from app.nlp.gemini_client import JsonLlmClient, try_generate_json
+from app.nlp.model_router import (
+    PARSED_BY_DETERMINISTIC,
+    PARSED_BY_GROQ,
+    ModelRouter,
+)
 from app.revenue_risk.risk_features import RiskFeatures
 
 logger = logging.getLogger(__name__)
@@ -28,6 +33,7 @@ class Classification:
     reasoning: str
     sources: tuple[str, ...]
     classifier_version: str
+    parsed_by_model: str = PARSED_BY_DETERMINISTIC
 
 
 # Prompt template for diagnostic rationale generation
@@ -62,10 +68,12 @@ class HybridClassifier:
         rules: RulesEngine | None = None,
         ml: ClassificationModel | None = None,
         llm_client: JsonLlmClient | None = None,
+        router: ModelRouter | None = None,
     ) -> None:
         self.rules = rules or RulesEngine()
         self.ml = ml
         self._llm = llm_client
+        self._router = router
 
     def classify(
         self, case: RecoveryCase, features: RiskFeatures, event: dict
@@ -93,6 +101,20 @@ class HybridClassifier:
                     reasoning="ML fallback selected highest-probability root cause.",
                     sources=("ml",),
                     classifier_version=self.ml.model_version,
+                )
+                self._maybe_generate_rationale(case, event, classification)
+                return classification
+
+        if self._router is not None:
+            fast = self._router.classify_failure_signal(event)
+            if fast.parsed_by == PARSED_BY_GROQ:
+                classification = Classification(
+                    root_cause=RootCause(fast.root_cause),
+                    confidence=fast.confidence,
+                    reasoning=fast.reasoning,
+                    sources=fast.sources,
+                    classifier_version="groq_fast_v1",
+                    parsed_by_model=fast.parsed_by,
                 )
                 self._maybe_generate_rationale(case, event, classification)
                 return classification

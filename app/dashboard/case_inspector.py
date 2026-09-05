@@ -68,6 +68,7 @@ from app.nlp.message_templates import (
     TemplateEngine,
     build_draft_context,
 )
+from app.nlp.model_router import PARSED_BY_DETERMINISTIC
 from app.optimizer.intervention_optimizer import InterventionOptimizer
 from app.policy.legal_basis import get_legal_basis
 from app.policy.policy_engine import PolicyEngine
@@ -152,6 +153,9 @@ class DecisionPacket:
     language: str  # "en" | "hi-en"
     case_narrative: str | None = None  # §1.2 one-paragraph "why this case is here"
     statutory: dict | None = None  # E.10 MSMED §16 ladder + notices (B2B cases)
+    parsed_by_model: str = (  # F.1 factual model attribution for this decision
+        PARSED_BY_DETERMINISTIC
+    )
 
 
 class CaseInspector:
@@ -276,6 +280,9 @@ class CaseInspector:
             language=language,
             case_narrative=case_narrative,
             statutory=statutory,
+            parsed_by_model=(
+                getattr(trace, "parsed_by_model", None) or PARSED_BY_DETERMINISTIC
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -1245,6 +1252,7 @@ def packet_to_dict(packet: DecisionPacket) -> dict[str, Any]:
         "amount": packet.amount,
         "status": packet.status,
         "trace_id": packet.trace_id,
+        "parsed_by_model": packet.parsed_by_model,
         "ingestion": {
             "raw_failure_reason": packet.ingestion.raw_failure_reason,
             "decline_code": packet.ingestion.decline_code,
