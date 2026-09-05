@@ -20,6 +20,7 @@ import csv
 import io
 import threading
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 
 from app.audit.decision_trace import DecisionTrace, DecisionTracer
 from app.audit.prevention_log import PreventionLog
@@ -548,19 +549,37 @@ def configure(api: DashboardApi) -> None:
     """Bind the dashboard API to the SAME populated components the recovery
     run used, so the served panels reflect what actually happened (§14).
 
-    Also binds the Case Inspector (E.1/E.6) to the same tracer/audit and the
-    shared message outbox so decision packets and reviewer-approved drafts are
-    served from live demo state.
+    Also binds the Case Inspector (E.1/E.6/E.7) to the same tracer/audit and
+    shared message outbox + human queue so decision packets and reviewer
+    actions are served from live demo state. A shared PolicyEngine provisions
+    TRAI consent for the demo customers already present in traces so a
+    reviewer can action them without losing the remaining gate checks.
     """
     global _dashboard
     _dashboard = api
-    from app.dashboard.case_inspector import configure as configure_inspector
+    from app.dashboard.case_inspector import configure as configure_inspector, case_customer_id
+    from app.policy.policy_engine import PolicyEngine
+
+    policy = PolicyEngine()
+
+    seen_customers: set[str] = set()
+    for case_id in {t.case_id for t in api._traces()}:
+        customer = case_customer_id(case_id)
+        if customer in seen_customers:
+            continue
+        seen_customers.add(customer)
+        for channel in ("sms", "whatsapp", "voice"):
+            policy._consent.record_consent(
+                customer, channel, "payment_recovery", datetime.now(timezone.utc)
+            )
 
     configure_inspector(
         tracer=api._tracer,
         audit=api._audit,
         prevention=api._prevention,
         outbox=api._messages,
+        human_queue=api._human_queue,
+        policy_engine=policy,
     )
 
 

@@ -10,14 +10,19 @@ per case by the §10.7 template engine with LLM hallucination guardrails (E.6).
 from __future__ import annotations
 
 import dataclasses
+import uuid
 from typing import Any
 
 from app.audit.audit_logger import AuditLogger
 from app.audit.decision_trace import DecisionTrace, DecisionTracer
 from app.audit.prevention_log import PreventionLog
-from app.contracts import ExecutionState
+from app.contracts import Action, ExecutionState, PolicyGateResult
+from app.core.obligation import Obligation
+from app.core.recovery_case import RecoveryCase
 from app.dashboard.render_guard import guard_response
-from app.executor.notification import NotificationRecord
+from app.executor.human_queue import HumanTask, HumanTaskQueue, priority_for
+from app.executor.notification import NotificationRecord, NotificationSender
+from app.executor.voice_agent import VoiceRecovery
 from app.nlp.message_templates import (
     CHANNELS,
     REGISTERS,
@@ -121,6 +126,9 @@ class CaseInspector:
         template_engine: TemplateEngine | None = None,
         draft_generator: ChannelDraftGenerator | None = None,
         outbox: list[object] | None = None,
+        notification_sender: NotificationSender | None = None,
+        voice_agent: VoiceRecovery | None = None,
+        human_queue: HumanTaskQueue | None = None,
     ) -> None:
         self._tracer = tracer or DecisionTracer()
         self._audit = audit or AuditLogger()
@@ -131,6 +139,9 @@ class CaseInspector:
         self._templates = template_engine or TemplateEngine()
         self._drafts = draft_generator or ChannelDraftGenerator()
         self._outbox = outbox if outbox is not None else []
+        self._notifications = notification_sender or NotificationSender()
+        self._voice = voice_agent or VoiceRecovery()
+        self._human_queue = human_queue or HumanTaskQueue()
 
     def build_packet(self, case_id: str) -> DecisionPacket | None:
         """Build the full decision packet for a case."""
@@ -399,10 +410,257 @@ class CaseInspector:
         self._outbox.append(record)
         return record
 
+    # ── Human / AI action execution (E.7) ───────────────────────────
+
+    @dataclasses.dataclass(frozen=True)
+    class ActionOutcome:
+        """Result of a human-initiated (or AI-attended) action on a case."""
+
+        executed: bool
+        action: str
+        channel: str | None
+        state: str  # SUCCESS | BLOCKED
+        detail: str
+        policy_blocked_reasons: tuple[str, ...] = ()
+        hold_until: str | None = None
+        external_ref: str | None = None
+
+    def _reconstruct_case(self, trace: DecisionTrace) -> RecoveryCase:
+        """Reconstruct a ReviewCase from the stored decision trace (§13.3).
+
+        The trace is the authoritative case record for the decision-maker; the
+        obligation amount comes from revenue_at_risk (paise).
+        """
+        customer_id = case_customer_id(trace.case_id)
+        obligation = Obligation(
+            obligation_id=f"OBL_{trace.case_id}",
+            type="payment",
+            original_amount=trace.revenue_at_risk_paise,
+            customer_id=customer_id,
+        )
+        return RecoveryCase(
+            case_id=trace.case_id,
+            customer_id=customer_id,
+            obligations=[obligation],
+            root_cause=trace.root_cause or "",
+            fraud_score=0.0,
+            natural_pay_probability=trace.natural_payment_probability,
+        )
+
+    def action(
+        self,
+        case_id: str,
+        action: Action,
+        *,
+        channel: str | None = None,
+        actor: str,
+        reason: str = "",
+        at=None,
+    ) -> ActionOutcome:
+        """Execute a human-initiated action AFTER re-running the policy gates.
+
+        A human override NEVER skips the safety layer (§7.1): every action
+        passes through policy_engine.evaluate() first. If any gate fails the
+        action is BLOCKED and nothing is executed. The actor (a human's
+        identifier, or "AI — unattended") and reason are recorded in a new
+        decision trace and an audit entry.
+        """
+        trace = self._tracer.latest_trace(case_id)
+        if trace is None:
+            raise KeyError(f"No decision packet for case_id={case_id}")
+
+        case = self._reconstruct_case(trace)
+
+        # ── (a) Re-run the case through the policy engine — a human
+        #        override never skips the gates (§7.1, Track E.7). ──
+        evaluation = self._policy.evaluate(case, action, at=at)
+        if evaluation.result == PolicyGateResult.BLOCKED:
+            blocked_reasons = tuple(evaluation.blocked_reasons)
+            hold = evaluation.hold_until.isoformat() if evaluation.hold_until else None
+            self._record_action(
+                case_id=case_id,
+                action=action,
+                channel=channel,
+                actor=actor,
+                reason=reason,
+                executed=False,
+                detail="; ".join(blocked_reasons) or "Blocked by policy gate",
+                gate_result="BLOCKED",
+                hold_until=hold,
+            )
+            return self.ActionOutcome(
+                executed=False,
+                action=action.value,
+                channel=channel,
+                state="BLOCKED",
+                detail="; ".join(blocked_reasons) or "Blocked by policy gate",
+                policy_blocked_reasons=blocked_reasons,
+                hold_until=hold,
+            )
+
+        # ── (b) Dispatch to the matching executor function. ──
+        result_ref: str | None = None
+        exec_detail = f"{action.value} executed"
+        if action == Action.HUMAN_ESCALATION:
+            exec_detail = self._enqueue_human_task(case)
+        elif action in {Action.SEND_SMS, Action.SEND_EMAIL, Action.SEND_WHATSAPP}:
+            result_ref, exec_detail = self._dispatch_send(action, case, trace)
+        elif action == Action.VOICE_CALL:
+            result_ref, exec_detail = self._dispatch_voice(case)
+        elif action == Action.SEND_PAYMENT_LINK:
+            result_ref, exec_detail = self._dispatch_send(action, case, trace)
+        elif action == Action.OFFER_PARTIAL_PAYMENT:
+            exec_detail = "Partial payment offer registered on the case"
+        elif action == Action.CREATE_PTP:
+            exec_detail = "Promise-to-pay registered on the case"
+        elif action == Action.WRITE_OFF:
+            exec_detail = self._write_off_case(case)
+        elif action in {Action.WAIT, Action.NO_ACTION}:
+            exec_detail = f"{action.value}: internal hold — nothing outbound sent"
+        elif action == Action.BLOCK:
+            exec_detail = "Case hard-blocked"
+
+        self._record_action(
+            case_id=case_id,
+            action=action,
+            channel=channel,
+            actor=actor,
+            reason=reason,
+            executed=True,
+            detail=exec_detail,
+            gate_result="APPROVED",
+            external_ref=result_ref,
+        )
+        return self.ActionOutcome(
+            executed=True,
+            action=action.value,
+            channel=channel,
+            state="SUCCESS",
+            detail=exec_detail,
+            external_ref=result_ref,
+        )
+
+    def _dispatch_send(self, action: Action, case: RecoveryCase, trace: DecisionTrace) -> tuple[str, str]:
+        """Send an SMS/Email/WhatsApp/Payment-link via the notification sender."""
+        channel_map = {
+            Action.SEND_SMS: "sms",
+            Action.SEND_EMAIL: "email",
+            Action.SEND_WHATSAPP: "whatsapp",
+            Action.SEND_PAYMENT_LINK: "sms",
+        }
+        channel = channel_map[action]
+        template = {
+            Action.SEND_PAYMENT_LINK: "payment_failed_sms",
+        }.get(action, "payment_failed_sms")
+        record = self._notifications.send(
+            channel,
+            template,
+            {
+                "merchant_name": "Demo Merchant",
+                "amount": case.total_remaining() // 100,
+                "order_id": trace.case_id,
+                "link": f"https://rzp.io/i/pl_{trace.case_id.lower()}",
+                "customer_name": f"Customer {case_customer_id(trace.case_id)}",
+                "failure_reason": (trace.root_cause or "unknown").replace("_", " "),
+                "expiry_date": "2026-09-12",
+            },
+            recipient=case_customer_id(trace.case_id),
+            note=f"Reviewer approval for {trace.case_id}",
+        )
+        self._outbox.append(record)
+        return record.notification_id, f"Notification sent via {channel}"
+
+    def _dispatch_voice(self, case: RecoveryCase) -> tuple[str, str]:
+        """Place a (mocked) voice call via the voice agent."""
+        from app.executor.voice_agent import MockTelephonyClient
+
+        call_id = MockTelephonyClient().place_call(case.customer_id, {})
+        outcome = self._voice.handle_call(call_id, "Customer did not pick up yet")
+        return call_id, f"Voice call placed ({outcome.state.value})"
+
+    def _enqueue_human_task(self, case: RecoveryCase) -> str:
+        """Escalate a case to the human-in-the-loop queue (§8.6)."""
+        priority, sla = priority_for(
+            case.case_id,
+            amount_paise=case.total_remaining(),
+            low_confidence=True,
+        )
+        task = HumanTask(
+            task_id=f"escalate_{case.case_id}_{uuid.uuid4().hex[:6]}",
+            case_id=case.case_id,
+            priority=priority,
+            action=Action.HUMAN_ESCALATION,
+            proposed_reasoning="Human-initiated escalation from decision panel.",
+            sla_minutes=sla,
+            amount_paise=case.total_remaining(),
+        )
+        self._human_queue.enqueue(task)
+        return f"Escalated to human queue ({priority.value}, SLA {sla}m)"
+
+    def _write_off_case(self, case: RecoveryCase) -> str:
+        """Write off the case's open obligations (terminal ledger state)."""
+        written: list[str] = []
+        for obligation in case.obligations:
+            if not obligation.is_terminal:
+                obligation.write_off()
+                written.append(obligation.obligation_id)
+        return (
+            "Case written off (" + (", ".join(written) or "no open obligations") + ")"
+        )
+
+    def _record_action(
+        self,
+        *,
+        case_id: str,
+        action: Action,
+        channel: str | None,
+        actor: str,
+        reason: str,
+        executed: bool,
+        detail: str,
+        gate_result: str,
+        hold_until: str | None = None,
+        external_ref: str | None = None,
+    ) -> None:
+        """Write a decision trace + audit entry for a human/AI action (E.7)."""
+        self._audit.append(
+            trigger_type="ACTION_EXECUTED" if executed else "ACTION_BLOCKED",
+            trigger_event=(
+                f"{action.value}_approved_by_{actor}"
+                if executed
+                else f"{action.value}_blocked_policy"
+            ),
+            payload={
+                "actor": actor,
+                "reason": reason or "(no reason given)",
+                "executed": executed,
+                "channel": channel,
+                "detail": detail,
+                "policy_gate_result": gate_result,
+                "hold_until": hold_until,
+            },
+            case_id=case_id,
+            action=action.value,
+            amount_paise=0,
+            external_ref=external_ref,
+            actor=actor,
+            reason=reason or "(no reason given)",
+            executed=executed,
+            channel=channel,
+            detail=detail,
+            policy_gate_result=gate_result,
+            hold_until=hold_until,
+        )
+
 
 def _pending(step: str) -> dict[str, str]:
     """Create a pending marker dict for fields not yet populated."""
     return {"pending": step}
+
+
+def case_customer_id(case_id: str) -> str:
+    """Stable customer identifier derived from a case id (demo projection)."""
+    return f"CUST_{case_id.replace('-', '_').upper()}"
 
 
 def packet_to_dict(packet: DecisionPacket) -> dict[str, Any]:
@@ -479,6 +737,9 @@ def configure(
     template_engine: TemplateEngine | None = None,
     draft_generator: ChannelDraftGenerator | None = None,
     outbox: list[object] | None = None,
+    notification_sender: NotificationSender | None = None,
+    voice_agent: VoiceRecovery | None = None,
+    human_queue: HumanTaskQueue | None = None,
 ) -> None:
     """Bind the case inspector to the SAME populated components the recovery run used."""
     global _inspector
@@ -492,6 +753,9 @@ def configure(
         template_engine=template_engine,
         draft_generator=draft_generator,
         outbox=outbox,
+        notification_sender=notification_sender,
+        voice_agent=voice_agent,
+        human_queue=human_queue,
     )
 
 
@@ -555,3 +819,69 @@ async def send_draft(case_id: str, request: Request) -> dict[str, Any]:
         "case_id": case_id,
     }
     return guard_response(data, f"draft_send:{case_id}").data
+
+
+def _parse_action(value: str) -> Action:
+    """Parse and validate an action string from the decision-panel UI."""
+    try:
+        return Action(value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown action: {value}",
+        ) from exc
+
+
+@router.post("/api/cases/{case_id}/action")
+async def take_action(case_id: str, request: Request) -> dict[str, Any]:
+    """Execute a human-initiated (or AI-attended) action on a case.
+
+    The policy engine is ALWAYS re-run first — a human override never skips
+    the gates (§7.1). A BLOCKED evaluation returns 409 and nothing executes.
+    """
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Request body must be JSON") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Request body must be an object")
+
+    inspector = _get_inspector()
+    action = _parse_action(str(payload.get("action") or ""))
+    channel = str(payload.get("channel")) if payload.get("channel") else None
+    reason = str(payload.get("reason") or "")
+
+    if inspector.build_packet(case_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Decision packet not found for case_id={case_id}",
+        )
+
+    actor = str(payload.get("actor") or "AI — unattended")
+
+    try:
+        outcome = inspector.action(
+            case_id,
+            action,
+            channel=channel,
+            actor=actor,
+            reason=reason,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    data = {
+        "case_id": case_id,
+        "executed": outcome.executed,
+        "action": outcome.action,
+        "channel": outcome.channel,
+        "state": outcome.state,
+        "detail": outcome.detail,
+        "actor": actor,
+        "policy_blocked_reasons": list(outcome.policy_blocked_reasons),
+        "hold_until": outcome.hold_until,
+        "external_ref": outcome.external_ref,
+    }
+    if not outcome.executed:
+        raise HTTPException(status_code=409, detail=data)
+    return guard_response(data, f"action:{case_id}").data

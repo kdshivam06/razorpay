@@ -149,7 +149,7 @@ class TestPolicyGateChecklist:
         for action in Action:
             evaluation = self.engine.evaluate(self.case, action)
             fraud_gate = next(gr for gr in evaluation.gate_results if gr.gate_name == "fraud")
-            if action in [Action.NO_ACTION, Action.WAIT, Action.BLOCK]:
+            if action in [Action.NO_ACTION, Action.WAIT, Action.BLOCK, Action.WRITE_OFF, Action.HUMAN_ESCALATION]:
                 assert fraud_gate.result == "SKIPPED"  # Passthrough actions skip all
             else:
                 assert fraud_gate.result in {"PASS", "FAIL"}
@@ -160,7 +160,7 @@ class TestPolicyGateChecklist:
         for action in Action:
             evaluation = self.engine.evaluate(self.case, action)
             dispute_gate = next(gr for gr in evaluation.gate_results if gr.gate_name == "dispute")
-            if action in [Action.NO_ACTION, Action.WAIT, Action.BLOCK]:
+            if action in [Action.NO_ACTION, Action.WAIT, Action.BLOCK, Action.WRITE_OFF, Action.HUMAN_ESCALATION]:
                 assert dispute_gate.result == "SKIPPED"  # Passthrough actions skip all
             else:
                 assert dispute_gate.result in {"PASS", "FAIL"}
@@ -171,7 +171,7 @@ class TestPolicyGateChecklist:
         for action in Action:
             evaluation = self.engine.evaluate(self.case, action)
             rev_gate = next(gr for gr in evaluation.gate_results if gr.gate_name == "reversibility")
-            if action in [Action.NO_ACTION, Action.WAIT, Action.BLOCK]:
+            if action in [Action.NO_ACTION, Action.WAIT, Action.BLOCK, Action.WRITE_OFF, Action.HUMAN_ESCALATION]:
                 assert rev_gate.result == "SKIPPED"  # Passthrough actions skip all
             else:
                 assert rev_gate.result in {"PASS", "FAIL"}

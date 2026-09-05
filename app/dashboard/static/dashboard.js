@@ -817,15 +817,45 @@ function renderDecisionPacket(data) {
         </div>
       </article>
 
-      <!-- Action Panel (E.7 - placeholder) -->
-      <article class="surface card empty-section">
+      <!-- Action Panel (E.7) -->
+      <article class="surface card action-panel-card">
         <header class="card-header">
           <i data-lucide="play-circle"></i>
-          <strong>Action Panel <span class="coming-soon">(E.7)</span></strong>
+          <strong>Action Panel</strong>
+          <span class="mini-label">Policy-gated · never bypasses §7.1</span>
         </header>
-        <div class="empty-placeholder">
-          <i data-lucide="clock"></i>
-          <p>Action execution, confirmation, and audit trail will appear here in E.7</p>
+        <div class="action-panel">
+          <div class="action-row">
+            <label class="action-field">
+              <span>Operator</span>
+              <input type="text" id="actionActor" placeholder="e.g. ops.shivam" value="ops.reviewer" />
+            </label>
+            <label class="action-field">
+              <span>Reason</span>
+              <input type="text" id="actionReason" placeholder="Why are you taking this action?" />
+            </label>
+          </div>
+          <div class="action-row">
+            <label class="action-field" id="approveSendField">
+              <span>Approve &amp; send via</span>
+              <select id="actionChannel">
+                <option value="sms" ${action === "SEND_SMS" ? "selected" : ""}>SMS</option>
+                <option value="email" ${action === "SEND_EMAIL" ? "selected" : ""}>Email</option>
+                <option value="whatsapp" ${action === "SEND_WHATSAPP" ? "selected" : ""}>WhatsApp</option>
+                <option value="payment_link" ${action === "SEND_PAYMENT_LINK" ? "selected" : ""}>Payment Link</option>
+                <option value="voice_script" ${action === "VOICE_CALL" ? "selected" : ""}>Voice Call</option>
+              </select>
+            </label>
+            <div class="action-buttons">
+              <button type="button" class="command-button small action-send-review" data-channel="approve"><i data-lucide="send"></i>Approve</button>
+            </div>
+          </div>
+          <div class="action-extra-buttons">
+            <button type="button" class="command-button small ghost action-extra" data-action="HUMAN_ESCALATION"><i data-lucide="user-plus"></i>Escalate to Human Call</button>
+            <button type="button" class="command-button small ghost action-extra" data-action="WAIT"><i data-lucide="hourglass"></i>Snooze 48h</button>
+            <button type="button" class="command-button small danger action-extra" data-action="WRITE_OFF"><i data-lucide="archive"></i>Write Off</button>
+          </div>
+          <div class="action-result" id="actionResult"></div>
         </div>
       </article>
     </div>
@@ -956,6 +986,56 @@ async function sendDraft(channel) {
   }
 }
 
+const ACTION_CHANNEL_MAP = {
+  sms: "SEND_SMS",
+  email: "SEND_EMAIL",
+  whatsapp: "SEND_WHATSAPP",
+  payment_link: "SEND_PAYMENT_LINK",
+  voice_script: "VOICE_CALL",
+};
+
+function actionPanelFields() {
+  return {
+    actor: (document.getElementById("actionActor")?.value || "").trim(),
+    reason: (document.getElementById("actionReason")?.value || "").trim(),
+  };
+}
+
+async function takeCaseAction(actionEnum) {
+  const result = document.getElementById("actionResult");
+  const fields = actionPanelFields();
+  if (!selectedCaseId) return;
+  result.className = "action-result";
+  result.textContent = "Evaluating policy gates…";
+
+  const body = {
+    action: actionEnum,
+    channel: actionEnum.startsWith("SEND_") ? document.getElementById("actionChannel")?.value || null : null,
+    actor: fields.actor || "AI — unattended",
+    reason: fields.reason || "(no reason given)",
+  };
+
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(selectedCaseId)}/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (res.status === 409) {
+      result.className = "action-result blocked";
+      result.textContent = `⛔ BLOCKED by policy: ${(data.detail && data.detail.policy_blocked_reasons) ? data.detail.policy_blocked_reasons.join("; ") : data.detail}`;
+      return;
+    }
+    if (!res.ok) throw new Error(data.detail || `action failed (${res.status})`);
+    result.className = "action-result success";
+    result.textContent = `✓ ${data.detail}${data.external_ref ? ` · ref ${data.external_ref}` : ""}`;
+  } catch (err) {
+    result.className = "action-result error";
+    result.textContent = `Failed: ${err.message}`;
+  }
+}
+
 function initControls() {
   document.querySelectorAll(".mode-switch button").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1020,6 +1100,14 @@ function initControls() {
     }
     const sendBtn = e.target.closest(".draft-send");
     if (sendBtn) sendDraft(sendBtn.dataset.channel);
+    const approveBtn = e.target.closest(".action-send-review");
+    if (approveBtn) {
+      const ch = document.getElementById("actionChannel")?.value || "sms";
+      takeCaseAction(ACTION_CHANNEL_MAP[ch] || "SEND_SMS");
+      return;
+    }
+    const extraBtn = e.target.closest(".action-extra");
+    if (extraBtn) takeCaseAction(extraBtn.dataset.action);
   });
 }
 

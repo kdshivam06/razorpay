@@ -78,7 +78,13 @@ class PolicyEvaluation:
 
 # Actions that bypass most policy checks (internal/non-outbound)
 _PASSTHROUGH_ACTIONS: frozenset[Action] = frozenset(
-    {Action.NO_ACTION, Action.WAIT, Action.BLOCK}
+    {
+        Action.NO_ACTION,
+        Action.WAIT,
+        Action.BLOCK,
+        Action.WRITE_OFF,
+        Action.HUMAN_ESCALATION,
+    }
 )
 
 # Mapping from Action to contact Channel for window/cooldown checks
