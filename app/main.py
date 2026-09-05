@@ -140,8 +140,10 @@ async def receive_webhook(
 # ---------------------------------------------------------------------------
 
 from app.dashboard.api import router as dashboard_router
+from app.dashboard.case_inspector import router as case_inspector_router
 
 app.include_router(dashboard_router)
+app.include_router(case_inspector_router)
 
 # ---------------------------------------------------------------------------
 # 15. Red Team — Attack the Agent demo (§16.1, §21.3)
