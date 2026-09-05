@@ -20,6 +20,7 @@
     </a>
     <nav class="main-nav" aria-label="Primary">
       <a href="index.html" class="active"><i data-lucide="bar-chart-3"></i>Waterfall</a>
+      <a href="intelligence.html"><i data-lucide="brain-circuit"></i>Case Intel</a>
       <a href="red_team.html"><i data-lucide="shield-alert"></i>Attack Lab</a>
     </nav>
     <div class="top-actions">
@@ -67,6 +68,33 @@
           <strong>Queued</strong>
         </div>
       </div>
+    </section>
+
+    <section class="surface data-console" data-panel="executive experiments guardrails">
+      <div class="surface-header">
+        <div>
+          <p class="eyebrow">Batch proof</p>
+          <h2>Upload or Stream Recovery Data</h2>
+        </div>
+        <i data-lucide="database-zap"></i>
+      </div>
+      <div class="data-actions">
+        <label class="file-picker">
+          <input id="batchFile" type="file" accept=".csv,text/csv" />
+          <span><i data-lucide="file-up"></i>Choose CSV</span>
+          <strong id="fileName">No file selected</strong>
+        </label>
+        <button class="command-button" id="uploadButton" type="button">
+          <i data-lucide="upload-cloud"></i>Process Upload
+        </button>
+        <button class="command-button ghost" id="syntheticButton" type="button">
+          <i data-lucide="database"></i>Load 2,184-row Batch
+        </button>
+        <button class="command-button ghost" id="realtimeButton" type="button">
+          <i data-lucide="radio"></i>Inject Realtime Event
+        </button>
+      </div>
+      <div class="dataset-proof" id="datasetProof"></div>
     </section>
 
     <section class="metric-strip" id="topMetrics" aria-label="Key recovery metrics"></section>
@@ -145,6 +173,7 @@
                 <th>Priority</th>
                 <th>Action</th>
                 <th>Reason</th>
+                <th></th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -156,6 +185,35 @@
           <p>Human-review context appears here when the queue has active work.</p>
         </aside>
       </div>
+    </section>
+
+    <!-- Case Inspector Modal/Drawer -->
+    <div class="modal-overlay" id="inspectorModal" role="dialog" aria-modal="true" aria-labelledby="inspectorTitle" hidden>
+      <div class="modal-drawer" id="inspectorDrawer">
+        <header class="modal-header">
+          <div>
+            <span class="mini-label" id="inspectorTitle">Decision Packet</span>
+            <h2 id="inspectorCaseId">—</h2>
+          </div>
+          <button type="button" class="icon-button" id="closeInspector" aria-label="Close decision packet">
+            <i data-lucide="x"></i>
+          </button>
+        </header>
+        <div class="modal-body" id="inspectorBody">
+          <div class="loading-placeholder">Loading decision packet…</div>
+        </div>
+      </div>
+    </div>
+
+    <section class="surface message-surface" data-panel="executive guardrails">
+      <div class="surface-header">
+        <div>
+          <p class="eyebrow">Execution proof</p>
+          <h2>Message Outbox</h2>
+        </div>
+        <i data-lucide="send-horizontal"></i>
+      </div>
+      <div class="message-list" id="messageOutbox"></div>
     </section>
   </main>
 </body>
