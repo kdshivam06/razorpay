@@ -457,6 +457,18 @@ class DashboardApi:
         """Dataset provenance for batch-upload and synthetic-demo proof."""
         return dict(self._dataset_summary)
 
+    def anomalies(self) -> dict[str, object]:
+        """Statistically flag failure cohorts with one-line policy fixes (§12.3)."""
+        from app.measurement.anomaly_clustering import analyze_traces
+
+        report = analyze_traces(self._traces())
+        data = report.to_dict()
+        data["note"] = (
+            "Two-proportion z-test vs batch baseline (z >= 2.58, cohort >= 5). "
+            "Detection only - no automatic policy change."
+        )
+        return data
+
     def merge_from(self, other: "DashboardApi") -> None:
         """Append another in-memory projection, used by realtime demo events."""
         for case_id, traces in other._tracer._traces.items():
@@ -661,6 +673,12 @@ def get_contacts_avoided() -> dict:
         "money_prevented_paise": ca.money_prevented_paise,
     }
     return guard_response(data, "contacts_avoided").data
+
+
+@router.get("/api/dashboard/anomalies")
+def get_anomalies() -> dict:
+    data = _get_dashboard().anomalies()
+    return guard_response(data, "anomalies").data
 
 
 @router.get("/api/dashboard/exception_queue")

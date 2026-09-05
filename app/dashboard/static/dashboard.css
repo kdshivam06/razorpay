@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   color-scheme: light;
   --ink: #17211d;
   --muted: #66746d;
@@ -2116,7 +2116,7 @@ button.attack:disabled {
   }
 }
 
-/* ── MSMED §16 statutory ladder card (E.10) ─────────────────────────────── */
+/* â”€â”€ MSMED Â§16 statutory ladder card (E.10) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .msmed-card .msmed-facts dd {
   font-variant-numeric: tabular-nums;
 }
@@ -2232,4 +2232,107 @@ button.attack:disabled {
 .msmed-action.danger {
   background: var(--danger, #b23b2e);
   color: #fff;
+}
+
+/* E.11 AI Analyzer anomaly clusters (§12.3) */
+.status-pill.ok span {
+  background: var(--emerald);
+  box-shadow: 0 0 0 4px rgba(8, 127, 91, 0.14);
+}
+
+.status-pill.danger span {
+  background: var(--coral);
+  box-shadow: 0 0 0 4px rgba(206, 74, 59, 0.14);
+}
+
+.chip.danger {
+  color: #9b2f25;
+  background: var(--coral-soft);
+}
+
+.chip.warn {
+  color: #7b4c00;
+  background: var(--gold-soft);
+}
+
+.chip.identity {
+  color: var(--muted);
+  background: rgba(97, 106, 119, 0.12);
+}
+
+.anomaly-readout {
+  display: grid;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.anomaly-kpis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.anomaly-kpis .kpi {
+  min-width: 120px;
+}
+
+.anomaly-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.anomaly-item {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+  background: var(--surface-soft);
+}
+
+.anomaly-item.flagged {
+  border-left: 4px solid var(--coral);
+}
+
+.anomaly-item header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.anomaly-item header strong {
+  flex: 1;
+}
+
+.anomaly-item header small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.anomaly-fix {
+  margin: 10px 0 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-soft, #334155);
+}
+
+.anomaly-item footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.empty-state {
+  padding: 18px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+}
+
+.empty-state strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--ink);
 }

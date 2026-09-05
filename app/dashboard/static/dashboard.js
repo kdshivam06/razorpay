@@ -642,6 +642,67 @@ function renderMessages(messages = []) {
     .join("");
 }
 
+function anomalySeverityClass(severity, flagged) {
+  if (flagged) return severity === "HIGH" ? "danger" : "warn";
+  return "identity";
+}
+
+function renderAnomalies(data = {}) {
+  const readout = document.getElementById("anomalyReadout");
+  const note = document.getElementById("anomalyNote");
+  if (!readout) return;
+  const clusters = Array.isArray(data.clusters) ? data.clusters : [];
+  const flagged = Number(data.flagged_count ?? 0);
+  const total = Number(data.total_traces ?? 0);
+
+  if (note && data.note) {
+    note.textContent = data.note;
+  }
+
+  const pill = document.getElementById("anomalyStatus");
+  if (pill?.classList) {
+    pill.className = `status-pill ${flagged ? "danger" : "ok"}`;
+    pill.innerHTML = `<span></span>${flagged ? `${flagged} flagged` : "No anomalies"}`;
+  }
+
+  if (!clusters.length) {
+    readout.innerHTML = `
+      <div class="empty-state">
+        <strong>No cohorts cleared the flag rule${total ? ` across ${total} traces` : ""}</strong>
+        <p>Load a synthetic batch to seed failure cohorts for clustering.</p>
+      </div>`;
+    return;
+  }
+
+  readout.innerHTML = `
+    <div class="anomaly-kpis">
+      <span class="kpi"><strong>${total}</strong>traces</span>
+      <span class="kpi"><strong>${escapeHTML(String(data.window_label ?? "-"))}</strong>IST window</span>
+      <span class="kpi"><strong>${flagged}</strong>flagged</span>
+    </div>
+    <div class="anomaly-list">
+      ${clusters
+        .map(
+          (c) => `
+          <article class="anomaly-item ${anomalySeverityClass(c.severity, c.flagged)}${c.flagged ? " flagged" : ""}">
+            <header>
+              <span class="chip ${anomalySeverityClass(c.severity, c.flagged)}">${escapeHTML(c.severity)}</span>
+              <strong>${escapeHTML(c.failure_family)}</strong>
+              <small>hour ${c.hour_ist == null ? "-" : String(c.hour_ist).padStart(2, "0")} IST · ${escapeHTML(c.amount_tier)} value</small>
+              ${c.flagged ? '<i data-lucide="triangle-alert"></i>' : '<i data-lucide="scan-line"></i>'}
+            </header>
+            <p class="anomaly-fix">${escapeHTML(c.suggested_fix)}</p>
+            <footer>
+              <span>${c.size} cases · ${c.n_failed} unresolved</span>
+              <span>cohort ${(c.failure_rate * 100).toFixed(1)}% vs baseline ${(c.baseline_failure_rate * 100).toFixed(1)}%</span>
+              <span>${String(Math.round(c.deviation_pp))}pp above baseline${c.z_score == null ? "" : ` · z ${c.z_score}`}</span>
+            </footer>
+          </article>`
+        )
+        .join("")}
+    </div>`;
+}
+
 function renderInspector(item) {
   document.getElementById("caseInspector").innerHTML = `
     <span class="mini-label">Selected case</span>
@@ -1358,7 +1419,7 @@ async function loadDashboard() {
     refresh?.classList.add("spinning");
     setStatus("", "Syncing");
 
-    const [wf, sc, segs, ca, queue, dataset, messages, autoQueue, humanQueue] = await Promise.all([
+    const [wf, sc, segs, ca, queue, dataset, messages, autoQueue, humanQueue, anomalies] = await Promise.all([
       getJSON("/api/dashboard/waterfall"),
       getJSON("/api/dashboard/scorecard"),
       getJSON("/api/dashboard/uplift_segments"),
@@ -1368,6 +1429,7 @@ async function loadDashboard() {
       getJSON("/api/dashboard/messages"),
       getJSON("/api/queue/auto-eligible"),
       getJSON("/api/queue/human-required"),
+      getJSON("/api/dashboard/anomalies"),
     ]);
 
     const liveState = { wf, sc, segs, ca, queue, dataset, messages, autoQueue, humanQueue };
@@ -1385,6 +1447,7 @@ async function loadDashboard() {
     renderQueueView(state.autoQueue, state.humanQueue);
     renderDatasetProof(state.dataset);
     renderMessages(state.messages);
+    renderAnomalies(state.anomalies);
     document.getElementById("pitchLine").textContent =
       `${state === SAMPLE_STATE ? "Demo seed: " : ""}Recovered ${compactINR(state.wf.incremental_net_recovery_paise)} net incremental value while avoiding ${fmt.format(state.sc.contacts_avoided ?? 0)} unnecessary contacts.`;
     document.getElementById("lastUpdated").textContent = `Updated ${new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
