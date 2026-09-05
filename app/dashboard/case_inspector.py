@@ -16,6 +16,7 @@ from app.audit.audit_logger import AuditLogger
 from app.audit.prevention_log import PreventionLog
 from app.contracts import Action, CandidateAction, RiskAssessment
 from app.core.recovery_case import RecoveryCase, UpliftSegment
+from app.dashboard.render_guard import guard_response
 from app.revenue_risk.exposure_engine import ExposureEngine
 from app.optimizer.intervention_optimizer import InterventionOptimizer
 from app.optimizer.recovery_economics import RecoveryEconomics
@@ -481,4 +482,5 @@ def get_decision_packet(case_id: str) -> dict[str, Any]:
             detail=f"Decision packet not found for case_id={case_id}",
         )
     
-    return packet_to_dict(packet)
+    data = packet_to_dict(packet)
+    return guard_response(data, f"decision_packet:{case_id}").data
