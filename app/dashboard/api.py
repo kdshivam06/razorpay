@@ -691,6 +691,7 @@ def _get_dashboard() -> DashboardApi:
                 from app.dashboard.demo_data import build_synthetic_demo_dashboard
 
                 _dashboard = build_synthetic_demo_dashboard()
+                configure(_dashboard)
             except Exception:  # noqa: BLE001
                 _dashboard = DashboardApi()
     return _dashboard

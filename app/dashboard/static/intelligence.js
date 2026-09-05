@@ -3,6 +3,8 @@ const fmt = new Intl.NumberFormat("en-IN");
 let cases = [];
 let activePlaybook = "all";
 let activeSegment = "all";
+let selectedCase = null;
+let selectedPacket = null;
 
 const rupee = (paise) =>
   paise == null
@@ -70,7 +72,9 @@ function renderCases() {
     row.addEventListener("click", () => {
       tbody.querySelectorAll("tr").forEach((r) => r.classList.remove("selected"));
       row.classList.add("selected");
-      renderDetail(filtered[Number(row.dataset.index)]);
+      const item = filtered[Number(row.dataset.index)];
+      renderDetail(item);
+      openCaseModal(item);
     });
   });
   renderDetail(filtered[0]);
@@ -168,6 +172,253 @@ function renderConversation(conversation = []) {
     </div>`;
 }
 
+async function openCaseModal(item) {
+  selectedCase = item;
+  selectedPacket = null;
+  const modal = document.getElementById("caseModal");
+  const drawer = document.getElementById("caseDrawer");
+  const title = document.getElementById("caseModalTitle");
+  const body = document.getElementById("caseModalBody");
+  title.textContent = item.case_id;
+  body.innerHTML = `<div class="loading-placeholder">Loading decision packet and action controls...</div>`;
+  modal.hidden = false;
+  requestAnimationFrame(() => {
+    modal.classList.add("open");
+    drawer.classList.add("open");
+  });
+
+  try {
+    selectedPacket = await getJSON(`/api/cases/${encodeURIComponent(item.case_id)}/decision-packet`);
+  } catch (err) {
+    selectedPacket = null;
+  }
+  renderCaseModal();
+}
+
+function closeCaseModal() {
+  const modal = document.getElementById("caseModal");
+  const drawer = document.getElementById("caseDrawer");
+  modal.classList.remove("open");
+  drawer.classList.remove("open");
+  setTimeout(() => {
+    modal.hidden = true;
+  }, 180);
+}
+
+function renderCaseModal(extra = "") {
+  const item = selectedCase;
+  const packet = selectedPacket || {};
+  const body = document.getElementById("caseModalBody");
+  if (!item || !body) return;
+
+  const diagnosis = packet.diagnosis || {};
+  const recommendation = packet.recommendation || {};
+  const drafts = packet.channel_drafts || {};
+  const ptp = item.ptp || {};
+  const paymentLink = item.automation_proof?.payment_link || `https://rzp.io/i/demo-${item.case_id.slice(-6)}`;
+  const recoveryScore = Math.round((item.predicted_recovery_probability || 0) * 100);
+  const naturalScore = Math.round((item.natural_payment_probability || 0) * 100);
+  const requiresHuman = item.human_instruction?.required === true || recommendation.requires_human === true;
+
+  body.innerHTML = `
+    <div class="case-modal-hero">
+      <div>
+        <p class="eyebrow">Transaction decision packet</p>
+        <h2>${escapeHTML(item.case_id)}</h2>
+        <p>${escapeHTML(packet.case_narrative || item.why || "AI scored this case and selected the safest recovery path.")}</p>
+      </div>
+      <div class="case-modal-money">
+        <span>Amount at risk</span>
+        <strong>${rupee(item.amount_paise)}</strong>
+        <a href="${escapeHTML(paymentLink)}" target="_blank" rel="noopener noreferrer">Razorpay demo link</a>
+      </div>
+    </div>
+
+    <div class="modal-kpi-grid">
+      ${modalKpi("Failure cause", cleanLabel(diagnosis.taxonomy_label || item.root_cause), "scan-search")}
+      ${modalKpi("Natural pay", `${naturalScore}%`, "timer")}
+      ${modalKpi("Predicted recovery", `${recoveryScore}%`, "trending-up")}
+      ${modalKpi("Person type", cleanLabel(item.uplift_segment), "users")}
+      ${modalKpi("AI action", cleanLabel(item.selected_action), "bot")}
+      ${modalKpi("Human needed", requiresHuman ? "Yes" : "No", requiresHuman ? "user-check" : "zap")}
+    </div>
+
+    <section class="modal-section">
+      <div class="section-title"><i data-lucide="brain-circuit"></i><strong>AI overview: what to do and what not to do</strong></div>
+      <div class="ai-do-dont">
+        <div>
+          <span class="mini-label">Do</span>
+          <p>${escapeHTML(item.next_step || "Execute the selected bounded recovery workflow.")}</p>
+        </div>
+        <div>
+          <span class="mini-label">Do not</span>
+          <p>${escapeHTML(doNotCopy(item))}</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="modal-section">
+      <div class="section-title"><i data-lucide="message-square-text"></i><strong>Outbound actions and exact drafts</strong></div>
+      <div class="quick-actions">
+        <button type="button" class="command-button small modal-action" data-action="SEND_SMS" data-channel="sms">Send SMS</button>
+        <button type="button" class="command-button small modal-action" data-action="SEND_EMAIL" data-channel="email">Send Email</button>
+        <button type="button" class="command-button small modal-action" data-action="SEND_WHATSAPP" data-channel="whatsapp">Send WhatsApp</button>
+        <button type="button" class="command-button small modal-payment-link">Create Razorpay Link</button>
+        <button type="button" class="command-button small modal-voice">AI Voice Call</button>
+        <button type="button" class="command-button small modal-action" data-action="CREATE_PTP">Create PTP</button>
+      </div>
+      <div class="modal-action-result" id="modalActionResult">${extra}</div>
+      <div class="draft-grid">${renderModalDrafts(drafts)}</div>
+    </section>
+
+    <section class="modal-section">
+      <div class="section-title"><i data-lucide="phone-call"></i><strong>Conversation, voice call, and customer reply</strong></div>
+      ${renderConversation(item.conversation)}
+      ${renderUserReply(item)}
+    </section>
+
+    <section class="modal-section">
+      <div class="section-title"><i data-lucide="calendar-check"></i><strong>Promise-to-pay and reminder deadline</strong></div>
+      ${renderPtp(ptp)}
+    </section>
+
+    <section class="modal-section">
+      <div class="section-title"><i data-lucide="shield-check"></i><strong>Policy and audit proof</strong></div>
+      ${renderHumanInstruction(item.human_instruction)}
+      <dl class="intel-facts">
+        <div><dt>Policy</dt><dd>${escapeHTML(item.policy_gate_result)}</dd></div>
+        <div><dt>Failed checks</dt><dd>${escapeHTML((item.policy_checks_failed || []).join("; ") || "None")}</dd></div>
+        <div><dt>Trace key</dt><dd>${escapeHTML(item.audit_summary?.trace_id || "-")}</dd></div>
+        <div><dt>Models</dt><dd>${escapeHTML(Object.values(item.audit_summary?.model_versions || {}).join(", "))}</dd></div>
+      </dl>
+    </section>`;
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function modalKpi(label, value, icon) {
+  return `<div class="trace-step"><i data-lucide="${icon}"></i><span>${escapeHTML(label)}</span><strong>${escapeHTML(value)}</strong></div>`;
+}
+
+function doNotCopy(item) {
+  if (item.policy_gate_result === "BLOCKED") return "Do not contact or retry; this case is blocked by policy.";
+  if (item.uplift_segment === "SURE_THING") return "Do not spend contact budget on a likely natural payer.";
+  if (item.uplift_segment === "SLEEPING_DOG") return "Do not nudge; intervention can reduce recovery probability.";
+  if (item.selected_action === "SEND_PAYMENT_LINK") return "Do not send duplicate links before reconciliation checks.";
+  return "Do not let free-form LLM text change amount, due date, policy gate, or execution path.";
+}
+
+function renderModalDrafts(drafts = {}) {
+  const rows = [
+    ["sms", "SMS", "smartphone"],
+    ["whatsapp", "WhatsApp", "message-circle"],
+    ["email", "Email", "mail"],
+    ["voice_script", "AI Voice Script", "mic"],
+  ];
+  return rows.map(([key, label, icon]) => {
+    const draft = pickDraft(drafts[key]);
+    return `<article class="draft-editor-block">
+      <div class="draft-editor-head"><i data-lucide="${icon}"></i><strong>${label}</strong></div>
+      ${draft.subject ? `<label class="draft-field"><span>Subject</span><input readonly value="${escapeHTML(draft.subject)}" /></label>` : ""}
+      <textarea class="draft-textarea" rows="${key === "voice_script" ? 5 : 4}" readonly>${escapeHTML(draft.body || "Draft unavailable until decision packet is loaded.")}</textarea>
+    </article>`;
+  }).join("");
+}
+
+function pickDraft(raw) {
+  if (!raw || raw.pending) return {};
+  if (typeof raw === "string") return { body: raw };
+  if (typeof raw.en === "string") return { body: raw.en };
+  if (raw.en?.body || raw.en?.subject) return raw.en;
+  if (typeof raw["hi-en"] === "string") return { body: raw["hi-en"] };
+  if (raw["hi-en"]?.body || raw["hi-en"]?.subject) return raw["hi-en"];
+  return {};
+}
+
+function renderUserReply(item) {
+  const ptp = item.ptp || {};
+  const reply = ptp.status === "promised"
+    ? `Customer reply: "Main ${ptp.promise_date} tak ${rupee(ptp.promise_amount_paise)} pay kar dunga. Reminder bhej dena."`
+    : ptp.status === "unable_to_pay"
+      ? 'Customer reply: "Abhi pay nahi ho paayega. Please support team se baat karwa do."'
+      : item.message_sent
+        ? 'Customer reply: "Please send payment link again."'
+        : "No customer reply yet because outreach was suppressed or waiting.";
+  return `<div class="reply-card"><span class="mini-label">Latest user reply</span><p>${escapeHTML(reply)}</p></div>`;
+}
+
+async function runModalAction(action, channel) {
+  const slot = document.getElementById("modalActionResult");
+  if (!selectedCase || !slot) return;
+  slot.className = "modal-action-result";
+  slot.textContent = "Re-running policy gates...";
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(selectedCase.case_id)}/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action,
+        channel: channel || null,
+        actor: "demo.ops",
+        reason: "Hackathon demo operator approved AI-suggested action",
+      }),
+    });
+    const data = await res.json();
+    if (res.status === 409) {
+      slot.classList.add("blocked");
+      slot.textContent = `Blocked by policy: ${(data.detail?.policy_blocked_reasons || [data.detail]).join("; ")}`;
+      return;
+    }
+    if (!res.ok) throw new Error(data.detail || `action failed (${res.status})`);
+    slot.classList.add("success");
+    slot.textContent = `${data.detail}${data.external_ref ? ` | ref ${data.external_ref}` : ""}`;
+  } catch (err) {
+    slot.classList.add("blocked");
+    slot.textContent = `Failed: ${err.message}`;
+  }
+}
+
+async function createModalPaymentLink() {
+  const slot = document.getElementById("modalActionResult");
+  if (!selectedCase || !slot) return;
+  slot.className = "modal-action-result";
+  slot.textContent = "Creating Razorpay Test Mode payment link...";
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(selectedCase.case_id)}/payment-link`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actor: "demo.payment_link" }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `payment link failed (${res.status})`);
+    slot.classList.add("success");
+    slot.innerHTML = `<a href="${escapeHTML(data.payment_url || data.short_url)}" target="_blank" rel="noopener noreferrer">Open Razorpay payment link</a><span>${escapeHTML(data.source)} | ${rupee(data.amount_paise)} | ${escapeHTML(data.short_url || "")}</span>`;
+  } catch (err) {
+    slot.classList.add("blocked");
+    slot.textContent = `Failed: ${err.message}`;
+  }
+}
+
+async function createModalVoice() {
+  const slot = document.getElementById("modalActionResult");
+  if (!selectedCase || !slot) return;
+  slot.className = "modal-action-result";
+  slot.textContent = "Generating AI voice nudge...";
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(selectedCase.case_id)}/voice-nudge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ register: "hi-en", actor: "demo.voice" }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `voice failed (${res.status})`);
+    slot.classList.add("success");
+    slot.innerHTML = `<audio controls src="${escapeHTML(data.audio_url)}" preload="none"></audio><span>${escapeHTML(data.call_state)} | ${escapeHTML(data.voice)} | ${Number(data.duration_seconds || 0).toFixed(1)}s</span>`;
+  } catch (err) {
+    slot.classList.add("blocked");
+    slot.textContent = `Failed: ${err.message}`;
+  }
+}
+
 function traceStep(label, value, icon) {
   return `<div class="trace-step">
     <i data-lucide="${icon}"></i>
@@ -198,6 +449,19 @@ function filteredCases() {
 function initControls() {
   document.getElementById("refreshButton")?.addEventListener("click", loadCases);
   document.getElementById("caseSearch")?.addEventListener("input", renderCases);
+  document.getElementById("caseModalClose")?.addEventListener("click", closeCaseModal);
+  document.getElementById("caseModal")?.addEventListener("click", (event) => {
+    if (event.target === document.getElementById("caseModal")) closeCaseModal();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeCaseModal();
+  });
+  document.getElementById("caseModalBody")?.addEventListener("click", (event) => {
+    const action = event.target.closest(".modal-action");
+    if (action) runModalAction(action.dataset.action, action.dataset.channel);
+    if (event.target.closest(".modal-payment-link")) createModalPaymentLink();
+    if (event.target.closest(".modal-voice")) createModalVoice();
+  });
   document.querySelectorAll(".playbook-card").forEach((button) => {
     button.addEventListener("click", () => {
       document.querySelectorAll(".playbook-card").forEach((b) => b.classList.remove("active"));
