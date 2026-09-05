@@ -95,6 +95,30 @@
         </button>
       </div>
       <div class="dataset-proof" id="datasetProof"></div>
+      <div class="data-preview-wrap">
+        <div class="mini-surface">
+          <span class="mini-label">Dataset sample judges can inspect</span>
+          <div class="table-wrap compact-table">
+            <table id="dataPreviewTable">
+              <thead>
+                <tr>
+                  <th>Case</th>
+                  <th>Event</th>
+                  <th>Amount</th>
+                  <th>Root Cause</th>
+                  <th>Persona</th>
+                  <th>Channel</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="mini-surface">
+          <span class="mini-label">PTP and reminder proof</span>
+          <div class="ptp-proof" id="ptpProof"></div>
+        </div>
+      </div>
       <div class="clock-console" data-panel="executive">
         <span class="mini-label">Demo clock (dev-only)</span>
         <span class="quiet" id="clockReadout">real time</span>
@@ -107,6 +131,17 @@
     </section>
 
     <section class="metric-strip" id="topMetrics" aria-label="Key recovery metrics"></section>
+
+    <section class="surface action-proof-surface" data-panel="executive guardrails">
+      <div class="surface-header">
+        <div>
+          <p class="eyebrow">Execution mix</p>
+          <h2>What the Agent Did</h2>
+        </div>
+        <i data-lucide="workflow"></i>
+      </div>
+      <div class="action-proof-grid" id="actionProof"></div>
+    </section>
 
     <section class="workspace-grid">
       <article class="surface surface-large" data-panel="executive experiments">

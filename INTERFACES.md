@@ -652,3 +652,17 @@ class DashboardApi:
 class RedTeamApi:
     def run_attack(self, attack_name: str, payload: dict) -> RedTeamOutcome
 ```
+Track A done. 58 passed (full pytest tests/ -v output pasted above), black reformatted 102 files, ruff check . all clean, committed as 58ce099. Working tree clean.
+Implemented vs stubbed
+Fully implemented (tested):
+- Core — Obligation ledger with state transitions, double-dip prevention, recovery lock; RecoveryCase + custom 18-state FSM (incl. UNKNOWN→RECONCILE); dependency health.
+- Config & env — pydantic-settings, fail-fast validation.
+- DB — SQLAlchemy 2.0 models (RecoveryCase, Obligation, AuditLog §13.6) + Alembic migration with append-only and hash-chain triggers (validated offline — live DB untested, Docker/Postgres creds unavailable).
+- Ingestion/Event Gateway — bulletproof HMAC-SHA256 + secret rotation, replay/freshness checks, dedup inbox, DLQ, batch loader, FastAPI POST /webhooks.
+- Docs — README setup, ARCHITECTURE (three-layer), INTERFACES (contract freeze), vendored master plan.
+Stubbed (60 modules, NotImplementedError pending Track B/C): classifier, revenue_risk, optimizer, policy, executor, reconciliation, nlp, measurement, audit, health, modules, b2b, dashboard — all with full type-hinted signatures and cross-track vocabulary in app/contracts.py.
+Things I'm least sure about in INTERFACES.md
+1. Track ownership split — the plan never names tracks, so the ML/Policy boundary (e.g. optimizer/ selection → Policy, reconciliation/ → ML, audit/ notably split both ways) is my judgment. Flippable if tracks disagree.
+2. OptimizationRecommendation vs a single decision shape — I left selected_action + candidates + stop reasons in one frozen record; tracks may want a leaner or richer decision bundle.
+3. Monetary fields typed int (paise) — I standardized on paise; §4.2 display numbers read like rupees, so teams must confirm convention with DB amount_paise columns.
+4. Enums I invented beyond the plan's boxes — Emotion, ContactFatigue, RiskLevel, ProcessingStatus aren't spelled out verbatim in the plan; treat as suggestions, not gospel.

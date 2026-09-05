@@ -30,6 +30,7 @@ from app.executor.action_executor import ActionExecutor, ExecutionResult
 from app.optimizer.intervention_optimizer import InterventionOptimizer
 from app.policy.policy_engine import PolicyEngine
 from app.reconciliation.pre_action_check import PreActionReconciler
+from app.revenue_risk.risk_features import FeatureBuilder, RiskFeatures
 from app.revenue_risk.uplift_model import UpliftEstimates
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,17 @@ class BaseRecoveryModule(ABC):
             uplift_segment=case.uplift_segment,
         )
 
+    def _build_ladder_features(self, case: RecoveryCase) -> RiskFeatures | None:
+        """Build the F.2 confidence-ladder features from the raw trigger event.
+
+        No audit event → no trained-model confidence → the optimizer stays in
+        legacy UNKNOWN mode rather than inventing a number.
+        """
+        raw = case.audit_events[-1] if case.audit_events else None
+        if raw is None:
+            return None
+        return FeatureBuilder().build(case, raw)
+
     # ── The AI Loop (§1.3) ────────────────────────────────────────
 
     def run(self, case: RecoveryCase) -> RecoveryModuleResult:
@@ -219,7 +231,8 @@ class BaseRecoveryModule(ABC):
         # computes requires_human_approval + reasoning (E.5).  The module's
         # candidates are projected onto the UpliftEstimates the optimizer needs.
         estimates = self._build_uplift_estimates(case, candidates)
-        recommendation = self._optimizer.optimize(case, estimates)
+        features = self._build_ladder_features(case)
+        recommendation = self._optimizer.optimize(case, estimates, features=features)
         
         logger.debug(
             "[%s] Step 7: OPTIMIZE — selected %s (score=%.2f, human=%s)",
@@ -282,6 +295,9 @@ class BaseRecoveryModule(ABC):
                 model_versions=self._versions.current().__dict__,
                 requires_human_approval=False,
                 reasoning="All candidates blocked by policy — no automated action permitted.",
+                confidence_probability=recommendation.confidence_probability,
+                confidence_tier=recommendation.confidence_tier,
+                confidence_source=recommendation.confidence_source,
             )
             return RecoveryModuleResult(
                 case_id=case.case_id,
@@ -368,6 +384,9 @@ class BaseRecoveryModule(ABC):
             model_versions=self._versions.current().__dict__,
             requires_human_approval=recommendation.requires_human_approval,
             reasoning=recommendation.reasoning,
+            confidence_probability=recommendation.confidence_probability,
+            confidence_tier=recommendation.confidence_tier,
+            confidence_source=recommendation.confidence_source,
         )
 
         # Audit log

@@ -48,8 +48,10 @@ def seeded_dashboard():
 def test_static_pages_are_served():
     for path in (
         "/static/index.html",
+        "/static/intelligence.html",
         "/static/red_team.html",
         "/static/dashboard.js",
+        "/static/intelligence.js",
         "/static/dashboard.css",
     ):
         assert client.get(path).status_code == 200
@@ -76,6 +78,12 @@ def test_dashboard_panels_are_served(seeded_dashboard):
     assert client.get("/api/dashboard/uplift_segments").status_code == 200
     assert client.get("/api/dashboard/contacts_avoided").status_code == 200
     assert client.get("/api/dashboard/exception_queue").status_code == 200
+    assert client.get("/api/dashboard/messages").status_code == 200
+    assert client.get("/api/dashboard/dataset").status_code == 200
+    assert client.get("/api/dashboard/data-preview").status_code == 200
+    assert client.get("/api/dashboard/action-summary").status_code == 200
+    assert client.get("/api/dashboard/ptp-summary").status_code == 200
+    assert client.get("/api/dashboard/cases").status_code == 200
 
 
 def test_red_team_endpoint_is_live():

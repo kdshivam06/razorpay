@@ -112,6 +112,13 @@ class RecommendationData:
     confidence: float
     reasoning: str | None
 
+    # Track F.2: the trained model's real predict_proba for this case, its
+    # ladder band, and which model produced it. confidence falls back to the
+    # economic score when no model was consulted.
+    confidence_probability: float | None = None
+    confidence_tier: str | None = None
+    confidence_source: str | None = None
+
 
 @dataclasses.dataclass(frozen=True)
 class SettlementProjection:
@@ -243,11 +250,21 @@ class CaseInspector:
         policy_gates = self._build_policy_gates(trace)
 
         # Build recommendation
+        model_confidence = getattr(trace, "confidence_probability", None)
         recommendation = RecommendationData(
             action=trace.selected_action.value if trace.selected_action else "NO_ACTION",
             requires_human=trace.requires_human_approval,
-            confidence=round(trace.selected_economic_score, 4) if trace.selected_economic_score else 0.0,
+            confidence=(
+                round(model_confidence, 4)
+                if model_confidence is not None
+                else (round(trace.selected_economic_score, 4) if trace.selected_economic_score else 0.0)
+            ),
             reasoning=trace.reasoning or trace.selection_reasoning or None,
+            confidence_probability=model_confidence,
+            confidence_tier=(
+                getattr(trace, "confidence_tier", None) or None
+            ),
+            confidence_source=getattr(trace, "confidence_source", None),
         )
 
         # Build settlement projection
@@ -1278,6 +1295,9 @@ def packet_to_dict(packet: DecisionPacket) -> dict[str, Any]:
             "action": packet.recommendation.action,
             "requires_human": packet.recommendation.requires_human,
             "confidence": packet.recommendation.confidence,
+            "confidence_probability": packet.recommendation.confidence_probability,
+            "confidence_tier": packet.recommendation.confidence_tier,
+            "confidence_source": packet.recommendation.confidence_source,
             "reasoning": packet.recommendation.reasoning,
         },
         "settlement_projection": {

@@ -20,6 +20,8 @@ DATA_DIR = PROJECT_ROOT / "data"
 BATCH_PATH = DATA_DIR / "synthetic_batch.csv"
 HISTORIES_PATH = DATA_DIR / "customer_histories.json"
 GROUND_TRUTH_PATH = DATA_DIR / "ground_truth.json"
+BATCH_SCALE = 4
+CUSTOMER_COUNT = 420
 
 BASE_TIME = datetime(2026, 8, 31, 9, 0, tzinfo=UTC)
 GENERATED_AT = BASE_TIME.replace(microsecond=0).isoformat()
@@ -721,13 +723,13 @@ CHANNELS = ("SMS", "EMAIL", "WHATSAPP", "VOICE_CALL", "PAYMENT_LINK")
 def main() -> None:
     rng = random.Random(SEED)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    customers = _build_customers(rng, count=180)
+    customers = _build_customers(rng, count=CUSTOMER_COUNT)
     records: list[dict[str, object]] = []
     truth: dict[str, dict[str, object]] = {}
 
     sequence = 1
     for spec in CATEGORY_SPECS:
-        for _ in range(spec.count):
+        for _ in range(spec.count * BATCH_SCALE):
             customer = _choose_customer(customers, spec.persona_weights, rng)
             record, record_truth = _build_record(sequence, spec, customer, rng)
             records.append(record)

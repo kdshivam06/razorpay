@@ -23,6 +23,7 @@ from app.audit.audit_logger import AuditLogger
 from app.audit.decision_trace import DecisionTracer
 from app.audit.prevention_log import PreventionLog
 from app.contracts import Action, CandidateAction
+from app.core.clock import clock
 from app.dashboard.case_inspector import CaseInspector, case_customer_id
 from app.executor.human_queue import HumanTaskQueue
 from app.main import app
@@ -74,6 +75,7 @@ class TestHumanApprovesAISuggestion:
     """(a) Human approves the AI-selected channel through the API layer."""
 
     def setup_method(self):
+        clock.set(datetime(2026, 9, 5, 10, 0, tzinfo=timezone.utc))
         self.case_id = "RC_PANEL_APPROVE_001"
         self.customer = case_customer_id(self.case_id)
         self.tracer = DecisionTracer()
@@ -128,6 +130,9 @@ class TestHumanApprovesAISuggestion:
         assert details["actor"] == "ops.shivam"
         assert details["reason"] == "Approving the AI-drafted SMS reminder"
         assert details["policy_gate_result"] == "APPROVED"
+
+    def teardown_method(self):
+        clock.reset()
 
 
 class TestHumanOverridesChannel:

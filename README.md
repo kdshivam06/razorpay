@@ -136,7 +136,10 @@ escalation, stopping rules, and an audit trail"), use:
 python data/generate_synthetic.py
 curl -X POST http://127.0.0.1:8000/api/dashboard/load-synthetic
 curl http://127.0.0.1:8000/api/dashboard/dataset
+curl http://127.0.0.1:8000/api/dashboard/data-preview?limit=10
 curl http://127.0.0.1:8000/api/dashboard/scorecard
+curl http://127.0.0.1:8000/api/dashboard/action-summary
+curl http://127.0.0.1:8000/api/dashboard/ptp-summary
 curl http://127.0.0.1:8000/api/dashboard/cases?limit=5
 curl http://127.0.0.1:8000/api/dashboard/messages
 ```
@@ -182,8 +185,15 @@ DUPLICATE / REJECTED results. Confirm the live path end-to-end:
 | GET | `/api/dashboard/uplift_segments` | §14.6 segment buckets |
 | GET | `/api/dashboard/contacts_avoided` | §14.4 contacts avoided |
 | GET | `/api/dashboard/exception_queue` | §14.6 human-review queue |
+| GET | `/api/dashboard/data-preview` | Demo-safe model-facing dataset rows; excludes held-out labels |
+| GET | `/api/dashboard/action-summary` | Counts of payment links, messages, voice calls, auto actions, human actions |
+| GET | `/api/dashboard/ptp-summary` | Promise-to-pay outcomes and reminder scheduling proof |
+| GET | `/api/dashboard/messages` | Rendered demo outbox for SMS/WhatsApp/email proof |
+| GET | `/api/dashboard/cases` | Clickable case intelligence rows with score, action plan, PTP, conversation, and audit metadata |
 | GET | `/api/dashboard/anomalies` | §16 AI Analyzer — anomaly clusters over recent traces (E.11) |
 | POST | `/api/dashboard/load-synthetic` | Load the synthetic batch into the in-memory dashboard (E.10) |
+| POST | `/api/dashboard/upload` | Score an uploaded CSV batch and rebuild the dashboard projection |
+| POST | `/api/dashboard/realtime-event` | Add one realtime event row to the live dashboard projection |
 | GET | `/api/cases/{case_id}/decision-packet` | §1.2 full decision packet incl. rationale + narrative (E.10) |
 | GET/POST | `/api/cases/{case_id}/msmed/status` | §16 MSMED ladder status; POST refreshes against the current clock |
 | POST | `/api/cases/{case_id}/msmed/conciliation` | Rung-4 filing workflow: request/approve/reject/dispatch (never auto-filed) |

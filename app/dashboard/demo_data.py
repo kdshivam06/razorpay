@@ -21,11 +21,20 @@ from app.dashboard.api import DashboardApi
 from app.executor.human_queue import HumanTask, HumanTaskQueue, priority_for
 from app.executor.notification import NotificationSender
 from app.nlp.model_router import PARSED_BY_DETERMINISTIC
+from app.optimizer.intervention_optimizer import ConfidenceLadder
 from app.policy.legal_basis import get_legal_basis
+from app.revenue_risk.payment_probability import PaymentPropensityModel
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BATCH_PATH = PROJECT_ROOT / "data" / "synthetic_batch.csv"
 GROUND_TRUTH_PATH = PROJECT_ROOT / "data" / "ground_truth.json"
+
+# Track F.2: the demo's confidence values MUST come from the trained model
+# (predict_proba on the row's real features) and the ladder from
+# recovery_config.yaml — never invented numbers.
+_PROPENSITY = PaymentPropensityModel()
+_CONFIDENCE_LADDER = ConfidenceLadder.load()
+_CONFIDENCE_SOURCE = getattr(_PROPENSITY, "_model_version", None) or "propensity_v1"
 
 # Deterministic interleave for synthetic demo builds (E.10 ladder visibility).
 _INTERLEAVE_SEED = 2026_09_05
@@ -106,6 +115,19 @@ def build_dashboard_from_rows(
             selected_action = _selected_action(normalized, segment, best)
             policy_failed = _policy_failures(normalized, segment, selected_action)
             policy_result = "BLOCKED" if policy_failed else "APPROVED"
+
+            # Track F.2: real model confidence + ladder band for THIS row.
+            confidence_probability = _PROPENSITY.probability_within(
+                _propensity_features_from_row(row),
+                _CONFIDENCE_LADDER.horizon_hours,
+            )
+            confidence_tier = _CONFIDENCE_LADDER.tier_for(confidence_probability).value
+            ladder_requires_human = (
+                confidence_tier
+                in {"HUMAN_REVIEW", "UNKNOWN"}
+                or segment == "SLEEPING_DOG"
+            )
+
             treated_probability = min(
                 1.0,
                 natural
@@ -117,12 +139,15 @@ def build_dashboard_from_rows(
 
             if selected_action is None:
                 _log_prevention(prevention, normalized, segment, amount)
-            if _needs_human(normalized, amount, policy_failed):
-                _enqueue_human_review(human_queue, normalized, amount, policy_failed)
+            if _needs_human(normalized, amount, policy_failed, ladder_requires_human):
+                _enqueue_human_review(
+                    human_queue, normalized, amount, policy_failed, ladder_requires_human
+                )
             if selected_action and not policy_failed:
                 _send_demo_message(notifications, normalized, selected_action, amount)
 
             pg_details, requires_human = _build_policy_gate_details(normalized, segment, selected_action, policy_failed)
+            requires_human = requires_human or ladder_requires_human
             root_cause = str(normalized.get("root_cause") or normalized.get("failure_reason") or "unknown_error")
 
             tracer.build(
@@ -170,6 +195,9 @@ def build_dashboard_from_rows(
                 requires_human_approval=requires_human,
                 reasoning=_build_action_reasoning(segment, selected_action, amount, natural, best),
                 parsed_by_model=PARSED_BY_DETERMINISTIC,
+                confidence_probability=round(confidence_probability, 4),
+                confidence_tier=confidence_tier,
+                confidence_source=_CONFIDENCE_SOURCE,
             )
 
     dataset_summary = {
@@ -191,6 +219,7 @@ def build_dashboard_from_rows(
         human_queue=human_queue,
         messages=notifications.sent_log,
         dataset_summary=dataset_summary,
+        data_preview=[_preview_row(_normalize_row(row)) for row in rows[:250]],
     )
 
 
@@ -237,6 +266,42 @@ def _normalize_row(row: dict[str, object]) -> dict[str, str]:
         "contact_count_7d": str(row.get("contact_count_7d") or "0"),
         "conversation_intent_hint": str(row.get("conversation_intent_hint") or ""),
         "customer_message_sample": str(row.get("customer_message_sample") or ""),
+    }
+
+
+def _preview_row(row: dict[str, str]) -> dict[str, object]:
+    """Expose only model-facing/demo-safe fields, never held-out labels."""
+    return {
+        "case_id": row["case_id"],
+        "event_type": row["event_type"],
+        "customer_id": row["customer_id"],
+        "obligation_id": row["obligation_id"],
+        "amount_paise": _int(row["amount_paise"]),
+        "outstanding_amount_paise": _int(row["outstanding_amount_paise"]),
+        "payment_method": row["payment_method"],
+        "failure_reason": row["failure_reason"],
+        "root_cause": row["root_cause"],
+        "persona": row["persona"],
+        "channel_preference": row["channel_preference"],
+        "conversation_intent_hint": row["conversation_intent_hint"],
+    }
+
+
+def _propensity_features_from_row(row: dict[str, object]) -> dict[str, float]:
+    """Project a raw dataset row onto the propensity model's inputs (F.2).
+
+    Only the features the trained model saw at training time are forwarded —
+    the hidden true_* ground-truth columns never reach inference (§15.3).
+    """
+    amount = _int(row.get("outstanding_amount_paise")) or _int(row.get("amount_paise")) or 0
+    prev_success = str(row.get("previous_retry_success") or "").strip().lower()
+    return {
+        "failure_reason": str(row.get("failure_reason") or "unknown_error"),
+        "amount_paise": float(max(0, amount)),
+        "days_overdue": float(max(0, _int(row.get("days_overdue")))),
+        "ptp_history_count": float(max(0, _int(row.get("ptp_history_count")))),
+        "previous_retry_success": 1.0 if prev_success in {"1", "true", "yes", "y"} else 0.0,
+        "hour_of_day": float(_int(row.get("hour_of_day")) or 12),
     }
 
 
@@ -799,8 +864,15 @@ def _build_action_reasoning(
     return f"Selected {selected_action.value} for {segment} segment ({uplift_pct:.0f}% uplift).{human_note}"
 
 
-def _needs_human(row: dict[str, str], amount: int, policy_failed: list[str]) -> bool:
+def _needs_human(
+    row: dict[str, str],
+    amount: int,
+    policy_failed: list[str],
+    ladder_requires_human: bool = False,
+) -> bool:
     if policy_failed:
+        return True
+    if ladder_requires_human:
         return True
     return amount > 10_000_000
 
@@ -810,13 +882,20 @@ def _enqueue_human_review(
     row: dict[str, str],
     amount: int,
     policy_failed: list[str],
+    ladder_requires_human: bool = False,
 ) -> None:
     priority, sla = priority_for(
         row["case_id"],
         amount_paise=amount,
         fraud_risk_high=str(row.get("failure_reason")) == "risk_block",
         disputed=str(row.get("failure_reason")) == "dispute_filed",
-        low_confidence=bool(policy_failed),
+        low_confidence=bool(policy_failed) or ladder_requires_human,
+    )
+    proposal = (
+        "Ladder: model P(pay) below the automated band — human review required."
+        if ladder_requires_human and not policy_failed
+        else "; ".join(policy_failed)
+        or "High-value case requires human approval."
     )
     queue.enqueue(
         HumanTask(
@@ -824,7 +903,7 @@ def _enqueue_human_review(
             case_id=row["case_id"],
             priority=priority,
             action=Action.HUMAN_ESCALATION,
-            proposed_reasoning="; ".join(policy_failed) or "High-value case requires human approval.",
+            proposed_reasoning=proposal,
             sla_minutes=sla,
             amount_paise=amount,
         )

@@ -418,6 +418,81 @@ h2 {
   margin: 18px 0;
 }
 
+.action-proof-surface {
+  margin-top: 18px;
+}
+
+.action-proof-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.proof-tile {
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+
+.proof-tile svg {
+  width: 18px;
+  height: 18px;
+  color: var(--emerald);
+}
+
+.proof-tile span {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.proof-tile strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  font-size: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action-bars {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.action-bars div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 10px;
+  align-items: center;
+}
+
+.action-bars span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action-bars meter {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 8px;
+}
+
 .data-console {
   margin-top: 18px;
 }
@@ -503,6 +578,39 @@ h2 {
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 8px;
   margin-top: 12px;
+}
+
+.data-preview-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.75fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.mini-surface {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.compact-table {
+  max-height: 236px;
+  margin-top: 8px;
+}
+
+.compact-table th,
+.compact-table td {
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.ptp-proof {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .proof-item {
@@ -949,6 +1057,11 @@ h2 {
   background: var(--surface-soft);
 }
 
+.action-plan.next-step {
+  border-color: rgba(8, 127, 91, 0.28);
+  background: linear-gradient(180deg, white, rgba(216, 243, 232, 0.58));
+}
+
 .action-plan strong {
   display: block;
   margin-bottom: 4px;
@@ -965,6 +1078,75 @@ h2 {
   display: grid;
   gap: 8px;
   margin: 12px 0 0;
+}
+
+.intel-facts.slim {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.human-box,
+.ptp-card,
+.conversation-card {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+
+.human-box.required {
+  border-color: rgba(206, 74, 59, 0.32);
+  background: linear-gradient(180deg, white, var(--coral-soft));
+}
+
+.human-box.auto {
+  border-color: rgba(8, 127, 91, 0.28);
+}
+
+.human-box strong,
+.ptp-card strong {
+  display: block;
+  font-size: 17px;
+}
+
+.human-box p,
+.ptp-card p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.human-box ul {
+  display: grid;
+  gap: 7px;
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: #40524a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.turn {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.turn span {
+  color: var(--emerald-strong);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.turn p {
+  margin: 0;
+  color: #40524a;
+  font-size: 13px;
 }
 
 .intel-facts div {
@@ -2026,11 +2208,14 @@ button.attack:disabled {
   .attack-lab,
   .queue-layout,
   .intel-toolbar,
-  .intel-grid {
+  .intel-grid,
+  .data-preview-wrap {
     grid-template-columns: 1fr;
   }
 
-  .metric-strip {
+  .metric-strip,
+  .action-proof-grid,
+  .action-bars {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -2090,7 +2275,10 @@ button.attack:disabled {
   .kpis.compact,
   .scorecard,
   .breakdown,
-  .flow {
+  .flow,
+  .action-proof-grid,
+  .action-bars,
+  .ptp-proof {
     grid-template-columns: 1fr;
   }
 

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RecoveryOS - Case Intelligence</title>
+  <link rel="stylesheet" href="dashboard.css" />
+  <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script defer src="intelligence.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html" aria-label="RecoveryOS dashboard">
+      <span class="brand-mark">R</span>
+      <span>
+        <strong>RecoveryOS</strong>
+        <small>Case-level recovery intelligence</small>
+      </span>
+    </a>
+    <nav class="main-nav" aria-label="Primary">
+      <a href="index.html"><i data-lucide="bar-chart-3"></i>Waterfall</a>
+      <a href="intelligence.html" class="active"><i data-lucide="brain-circuit"></i>Case Intel</a>
+      <a href="red_team.html"><i data-lucide="shield-alert"></i>Attack Lab</a>
+    </nav>
+    <div class="top-actions">
+      <span class="status-pill" id="apiStatus"><span></span>Syncing</span>
+      <button class="icon-button" id="refreshButton" type="button" aria-label="Refresh intelligence" title="Refresh intelligence">
+        <i data-lucide="refresh-cw"></i>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero-panel intel-hero">
+      <div class="hero-copy">
+        <p class="eyebrow">Row-level explainability</p>
+        <h1>Every case shows the diagnosis, score, action, stop rule, and audit reason.</h1>
+        <p id="intelPitch">Loading customer recovery intelligence from the active dashboard batch.</p>
+      </div>
+      <div class="playbook-grid" aria-label="Recovery playbooks">
+        <button class="playbook-card active" type="button" data-playbook="all">
+          <i data-lucide="layout-grid"></i><span>All workflows</span>
+        </button>
+        <button class="playbook-card" type="button" data-playbook="Payment degradation recovery">
+          <i data-lucide="activity"></i><span>Payment degradation</span>
+        </button>
+        <button class="playbook-card" type="button" data-playbook="Checkout drop-off recovery">
+          <i data-lucide="shopping-cart"></i><span>Checkout drop-off</span>
+        </button>
+        <button class="playbook-card" type="button" data-playbook="Failed-subscription / mandate retry">
+          <i data-lucide="repeat-2"></i><span>Subscription + mandate</span>
+        </button>
+        <button class="playbook-card" type="button" data-playbook="B2B receivables chaser">
+          <i data-lucide="building-2"></i><span>B2B receivables</span>
+        </button>
+        <button class="playbook-card" type="button" data-playbook="Hinglish voice recovery">
+          <i data-lucide="phone-call"></i><span>Hinglish voice</span>
+        </button>
+        <button class="playbook-card" type="button" data-playbook="Promise-to-pay tracker">
+          <i data-lucide="calendar-check"></i><span>Promise-to-pay</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="intel-toolbar surface">
+      <div class="search-box">
+        <i data-lucide="search"></i>
+        <input id="caseSearch" type="search" placeholder="Search case, root cause, segment, action..." />
+      </div>
+      <div class="segmented" id="segmentFilter" aria-label="Segment filter">
+        <button class="active" type="button" data-segment="all">All</button>
+        <button type="button" data-segment="PERSUADABLE">Persuadable</button>
+        <button type="button" data-segment="SURE_THING">Sure</button>
+        <button type="button" data-segment="LOST_CAUSE">Lost</button>
+        <button type="button" data-segment="SLEEPING_DOG">Sleep</button>
+      </div>
+    </section>
+
+    <section class="intel-grid">
+      <article class="surface">
+        <div class="surface-header">
+          <div>
+            <p class="eyebrow">Customer classification</p>
+            <h2>Scored Cases</h2>
+          </div>
+          <span class="quiet" id="caseCount">0 cases</span>
+        </div>
+        <div class="table-wrap intel-table-wrap">
+          <table id="caseTable">
+            <thead>
+              <tr>
+                <th>Case</th>
+                <th>Root Cause</th>
+                <th>Segment</th>
+                <th>Recovery Score</th>
+                <th>Action</th>
+                <th>Policy</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </article>
+
+      <aside class="surface intel-inspector" id="caseDetail">
+        <div class="surface-header">
+          <div>
+            <p class="eyebrow">Decision trace</p>
+            <h2>Select a Case</h2>
+          </div>
+          <i data-lucide="file-search"></i>
+        </div>
+        <p class="quiet">Choose a row to inspect the action plan and safety gates.</p>
+      </aside>
+    </section>
+  </main>
+</body>
+</html>

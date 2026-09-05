@@ -98,6 +98,13 @@ class DecisionTrace:
     # Track F.1: which model path actually produced this decision's signal parse
     parsed_by_model: str = PARSED_BY_DETERMINISTIC
 
+    # Track F.2: trained-model confidence for this decision — the REAL
+    # predict_proba output, its ladder band, and the source model. None/UNKNOWN
+    # only when no trained model was consulted (never an invented number).
+    confidence_probability: float | None = None
+    confidence_tier: str | None = None
+    confidence_source: str | None = None
+
     # Versions
     model_versions: dict = dataclasses.field(default_factory=dict)
 
@@ -144,6 +151,9 @@ class DecisionTracer:
         reasoning: str = "",
         case_narrative: str = "",
         parsed_by_model: str = PARSED_BY_DETERMINISTIC,
+        confidence_probability: float | None = None,
+        confidence_tier: str | None = None,
+        confidence_source: str | None = None,
     ) -> DecisionTrace:
         """Build a complete decision trace and store it."""
         trace = DecisionTrace(
@@ -178,6 +188,9 @@ class DecisionTracer:
             reasoning=reasoning,
             case_narrative=case_narrative,
             parsed_by_model=parsed_by_model,
+            confidence_probability=confidence_probability,
+            confidence_tier=confidence_tier,
+            confidence_source=confidence_source,
         )
 
         self._traces.setdefault(case_id, []).append(trace)

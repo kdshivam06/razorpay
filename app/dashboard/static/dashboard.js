@@ -190,6 +190,33 @@ const SAMPLE_STATE = {
       rendered_body: "[Demo Merchant] Your payment of ₹8,400 for order OBL_001 could not be processed. Complete payment: https://rzp.io/i/demo",
     },
   ],
+  actionSummary: {
+    actions: { SEND_PAYMENT_LINK: 86, SEND_WHATSAPP: 54, SEND_SMS: 32, VOICE_CALL: 12, NO_ACTION: 116 },
+    channels: { SMS: 32, WHATSAPP: 54, EMAIL: 18 },
+    auto_resolved: 172,
+    human_required: 42,
+    messages_sent: 104,
+    payment_links_sent: 86,
+    voice_calls_queued: 12,
+  },
+  ptpSummary: {
+    ptp_cases: 64,
+    answered: 47,
+    not_answered: 17,
+    agreed_to_pay: 31,
+    reminders_scheduled: 31,
+    by_status: { promised: 31, asked_for_link: 16, unable_to_pay: 17 },
+  },
+  dataPreview: [
+    {
+      case_id: "case_syn_00001",
+      event_type: "payment.failed",
+      amount_paise: 739800,
+      root_cause: "insufficient_funds",
+      persona: "P7",
+      channel_preference: "WHATSAPP",
+    },
+  ],
 };
 
 const rupee = (paise) =>
@@ -321,6 +348,64 @@ function renderDatasetProof(dataset = {}) {
 
 function proofItem(label, value) {
   return `<div class="proof-item"><span>${label}</span><strong>${value}</strong></div>`;
+}
+
+function renderDataPreview(rows = []) {
+  const tbody = document.querySelector("#dataPreviewTable tbody");
+  if (!tbody) return;
+  const visible = rows.slice(0, 7);
+  if (!visible.length) {
+    tbody.innerHTML = `<tr class="empty"><td colspan="6">Load or upload a batch to show model-facing rows.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = visible.map((row) => `
+    <tr>
+      <td>${escapeHTML(row.case_id)}</td>
+      <td>${escapeHTML(row.event_type)}</td>
+      <td>${compactINR(row.outstanding_amount_paise ?? row.amount_paise)}</td>
+      <td>${escapeHTML(cleanLabel(row.root_cause || row.failure_reason))}</td>
+      <td>${escapeHTML(row.persona || "-")}</td>
+      <td>${escapeHTML(row.channel_preference || "-")}</td>
+    </tr>`).join("");
+}
+
+function renderActionProof(summary = {}) {
+  const el = document.getElementById("actionProof");
+  if (!el) return;
+  const channels = summary.channels || {};
+  const actions = summary.actions || {};
+  const topActions = Object.entries(actions)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6);
+  el.innerHTML = [
+    proofTile("Auto-resolved", fmt.format(summary.auto_resolved || 0), "zap"),
+    proofTile("Human required", fmt.format(summary.human_required || 0), "user-check"),
+    proofTile("Messages sent", fmt.format(summary.messages_sent || 0), "send-horizontal"),
+    proofTile("Payment links", fmt.format(summary.payment_links_sent || 0), "credit-card"),
+    proofTile("Voice calls", fmt.format(summary.voice_calls_queued || 0), "phone-call"),
+    proofTile("Channels", Object.entries(channels).map(([k, v]) => `${cleanLabel(k)} ${v}`).join(" · ") || "-", "messages-square"),
+    `<div class="action-bars">${topActions.map(([name, count]) => `
+      <div>
+        <span>${escapeHTML(cleanLabel(name))}</span>
+        <strong>${fmt.format(count)}</strong>
+        <meter min="0" max="${Math.max(...topActions.map(([, value]) => value), 1)}" value="${count}"></meter>
+      </div>`).join("")}</div>`,
+  ].join("");
+}
+
+function proofTile(label, value, icon) {
+  return `<article class="proof-tile"><i data-lucide="${icon}"></i><span>${label}</span><strong>${value}</strong></article>`;
+}
+
+function renderPtpProof(summary = {}) {
+  const el = document.getElementById("ptpProof");
+  if (!el) return;
+  el.innerHTML = [
+    proofItem("PTP cases", fmt.format(summary.ptp_cases || 0)),
+    proofItem("Answered", fmt.format(summary.answered || 0)),
+    proofItem("Agreed", fmt.format(summary.agreed_to_pay || 0)),
+    proofItem("Reminders", fmt.format(summary.reminders_scheduled || 0)),
+  ].join("");
 }
 
 function renderWaterfall(wf) {
@@ -1476,7 +1561,7 @@ async function loadDashboard() {
     refresh?.classList.add("spinning");
     setStatus("", "Syncing");
 
-    const [wf, sc, segs, ca, queue, dataset, messages, autoQueue, humanQueue, anomalies] = await Promise.all([
+    const [wf, sc, segs, ca, queue, dataset, messages, autoQueue, humanQueue, anomalies, actionSummary, ptpSummary, dataPreview] = await Promise.all([
       getJSON("/api/dashboard/waterfall"),
       getJSON("/api/dashboard/scorecard"),
       getJSON("/api/dashboard/uplift_segments"),
@@ -1487,9 +1572,12 @@ async function loadDashboard() {
       getJSON("/api/queue/auto-eligible"),
       getJSON("/api/queue/human-required"),
       getJSON("/api/dashboard/anomalies"),
+      getJSON("/api/dashboard/action-summary"),
+      getJSON("/api/dashboard/ptp-summary"),
+      getJSON("/api/dashboard/data-preview?limit=25"),
     ]);
 
-    const liveState = { wf, sc, segs, ca, queue, dataset, messages, autoQueue, humanQueue };
+    const liveState = { wf, sc, segs, ca, queue, dataset, messages, autoQueue, humanQueue, anomalies, actionSummary, ptpSummary, dataPreview };
     const state = hasDashboardSignal(liveState) ? liveState : SAMPLE_STATE;
     dashboardState = state;
     if (state === SAMPLE_STATE) {
@@ -1505,6 +1593,9 @@ async function loadDashboard() {
     renderDatasetProof(state.dataset);
     renderMessages(state.messages);
     renderAnomalies(state.anomalies);
+    renderActionProof(state.actionSummary);
+    renderPtpProof(state.ptpSummary);
+    renderDataPreview(state.dataPreview);
     refreshClockState();
     document.getElementById("pitchLine").textContent =
       `${state === SAMPLE_STATE ? "Demo seed: " : ""}Recovered ${compactINR(state.wf.incremental_net_recovery_paise)} net incremental value while avoiding ${fmt.format(state.sc.contacts_avoided ?? 0)} unnecessary contacts.`;
@@ -1607,6 +1698,9 @@ function renderOffline(err) {
   document.getElementById("scorecardKpis").innerHTML = "";
   renderDatasetProof({});
   renderMessages([]);
+  renderActionProof({});
+  renderPtpProof({});
+  renderDataPreview([]);
   renderWaterfall({
     revenue_at_risk_paise: 0,
     expected_natural_recovery_paise: 0,

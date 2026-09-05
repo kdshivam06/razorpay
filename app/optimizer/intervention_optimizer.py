@@ -14,21 +14,27 @@ the Executor (§8) performs.
 from __future__ import annotations
 
 import dataclasses
+import enum
 import logging
+from pathlib import Path
 
 from app.contracts import (
     Action,
     CandidateAction,
+    ContactChannel,
     RecoveryStopReason,
 )
 from app.core.obligation import ObligationStatus
 from app.core.recovery_case import RecoveryCase, UpliftSegment
 from app.optimizer.action_suppression import ActionSuppressor
+from app.optimizer.channel_affinity import ChannelAffinityModel
 from app.optimizer.contact_fatigue import ContactFatigueEngine
 from app.optimizer.recovery_economics import RecoveryEconomics
 from app.policy.blast_radius import BlastRadiusGuard
 from app.policy.fraud_detector import FraudDetector
 from app.policy.reversibility import ReversibilityScorer
+from app.revenue_risk.payment_probability import PaymentPropensityModel
+from app.revenue_risk.risk_features import RiskFeatures
 from app.revenue_risk.uplift_model import UpliftEstimates
 
 logger = logging.getLogger(__name__)
@@ -37,6 +43,20 @@ logger = logging.getLogger(__name__)
 # fires and the agent prefers NO_ACTION.  §6.9: "expected incremental recovery
 # < minimum threshold".  Default ₹5 = 500 paise.
 _MIN_INCREMENTAL_PAISE = 500
+
+
+class ConfidenceTier(str, enum.Enum):
+    """Autonomy tier from the trained model's confidence (§F.2 ladder).
+
+    The tier is derived ONLY from the model's real P(payment within horizon)
+    for the specific case — never a hardcoded or invented number.
+    """
+
+    HIGH = "HIGH"  # >= high_threshold → SMS/WhatsApp reminder + payment link
+    MEDIUM = "MEDIUM"  # >= medium_threshold → auto AI voice nudge (E.8)
+    EMERGING = "EMERGING"  # auto, channel via affinity/fatigue
+    HUMAN_REVIEW = "HUMAN_REVIEW"  # < low_threshold, hard flag, or SLEEPING_DOG
+    UNKNOWN = "UNKNOWN"  # no trained model output available → route to human
 
 
 @dataclasses.dataclass(frozen=True)
@@ -58,10 +78,86 @@ class OptimizationRecommendation:
     # diagnostic rationale in E.4 — this explains the *action choice*)
     reasoning: str = ""
 
+    # Track F.2: the confidence ladder provenance. confidence_probability is
+    # the trained model's REAL predict_proba for the case, confidence_tier its
+    # band, confidence_source which model produced it. None/UNKNOWN means no
+    # trained model was consulted (caller must not invent a number).
+    confidence_probability: float | None = None
+    confidence_tier: str | None = None
+    confidence_source: str | None = None
+
     @property
     def recommended_action(self) -> Action:
         """Alias for selected_action for API clarity."""
         return self.selected_action
+
+
+@dataclasses.dataclass(frozen=True)
+class ConfidenceLadder:
+    """F.2 confidence-ladder thresholds, read from recovery_config.yaml.
+
+    Names/tiers follow the spec regardless of the threshold VALUES, so the
+    ladder is tunable end-to-end:
+        >= high_threshold        → HIGH        (SMS/WhatsApp reminder + link)
+        medium..high             → MEDIUM      (auto AI voice nudge via E.8)
+        low..medium              → EMERGING    (channel via affinity/fatigue)
+        < low_threshold          → HUMAN_REVIEW
+        no model output          → UNKNOWN     (route to human)
+    """
+
+    high_threshold: float = 0.80
+    medium_threshold: float = 0.70
+    low_threshold: float = 0.60
+    horizon_hours: int = 168
+
+    @classmethod
+    def load(cls, path: str | None = None) -> ConfidenceLadder:
+        """Load ladder from app/recovery_config.yaml with spec defaults.
+
+        Silent fallback to spec defaults if the file, section, or a threshold
+        is missing or inconsistent — configuration must never crash the loop.
+        """
+        if path is None:
+            path = str(Path(__file__).resolve().parents[1] / "recovery_config.yaml")
+        cfg: dict = {}
+        try:  # noqa: BLE001 — external config is a fail-safe boundary
+            import yaml
+
+            with open(path, encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+        except Exception:
+            return cls()
+        section = cfg.get("confidence_ladder") or {}
+        try:
+            high = float(section["high_threshold"])
+            medium = float(section["medium_threshold"])
+            low = float(section["low_threshold"])
+            horizon = int(section.get("horizon_hours", 168))
+            if not (0.0 <= low < medium < high <= 1.0) or horizon <= 0:
+                return cls()
+            return cls(high, medium, low, horizon)
+        except (TypeError, ValueError, KeyError):
+            return cls()
+
+    def tier_for(self, probability: float) -> ConfidenceTier:
+        """Map a model probability to its autonomy band."""
+        if probability >= self.high_threshold:
+            return ConfidenceTier.HIGH
+        if probability >= self.medium_threshold:
+            return ConfidenceTier.MEDIUM
+        if probability >= self.low_threshold:
+            return ConfidenceTier.EMERGING
+        return ConfidenceTier.HUMAN_REVIEW
+
+
+# Action → ContactChannel for the affinity/fatigue channel selection (F.2).
+_ACTION_CHANNELS: dict[Action, ContactChannel] = {
+    Action.SEND_SMS: ContactChannel.SMS,
+    Action.SEND_EMAIL: ContactChannel.EMAIL,
+    Action.SEND_WHATSAPP: ContactChannel.WHATSAPP,
+    Action.VOICE_CALL: ContactChannel.VOICE_CALL,
+    Action.SEND_PAYMENT_LINK: ContactChannel.PAYMENT_LINK,
+}
 
 
 class InterventionOptimizer:
@@ -83,6 +179,9 @@ class InterventionOptimizer:
         fraud_detector: FraudDetector | None = None,
         blast_radius: BlastRadiusGuard | None = None,
         min_incremental_paise: int = _MIN_INCREMENTAL_PAISE,
+        propensity: PaymentPropensityModel | None = None,
+        affinity: ChannelAffinityModel | None = None,
+        ladder: ConfidenceLadder | None = None,
     ) -> None:
         self._econ = economics or RecoveryEconomics()
         self._suppressor = suppressor or ActionSuppressor()
@@ -92,6 +191,13 @@ class InterventionOptimizer:
         self._blast_radius = blast_radius or BlastRadiusGuard()
         self._min_incremental = min_incremental_paise
 
+        # Track F.2: the trained propensity model + ladder config. The model is
+        # the ONLY source of confidence — probabilities are predict_proba
+        # output for the specific case, never invented.
+        self._propensity = propensity or PaymentPropensityModel()
+        self._affinity = affinity or ChannelAffinityModel()
+        self._ladder = ladder or ConfidenceLadder.load()
+
     # ------------------------------------------------------------------
     # Main entry point
     # ------------------------------------------------------------------
@@ -100,6 +206,8 @@ class InterventionOptimizer:
         self,
         case: RecoveryCase,
         estimates: UpliftEstimates,
+        *,
+        features: RiskFeatures | None = None,
     ) -> OptimizationRecommendation:
         """Run the full §1.1 optimisation pipeline for one case.
 
@@ -108,18 +216,33 @@ class InterventionOptimizer:
         2. Build economic candidates (all 14 actions + NO_ACTION baseline).
         3. Apply suppression (§6.5) to filter candidates.
         4. Apply uplift-segment overrides (§5.4).
-        5. Select best candidate by economic score.
-        6. Apply financial stop rule (§6.9): if best < min threshold → NO_ACTION.
+        5. Resolve the F.2 confidence ladder from the trained model (armed only
+           when `features` are given — otherwise tier UNKNOWN and legacy
+           selection semantics apply unchanged).
+        6. Select best candidate by economic score.
+        7. Apply financial stop rule (§6.9): if best < min threshold → NO_ACTION.
+        8. Route the band: HIGH → reminder+link, MEDIUM → voice nudge,
+           EMERGING → affinity/fatigue channel, HUMAN_REVIEW → human.
         """
+
+        # Arm the confidence ladder from the trained propensity model when the
+        # caller supplies the case's features; otherwise tier=UNKNOWN.
+        confidence_probability, tier, confidence_source = self._resolve_confidence(
+            case, estimates, features
+        )
 
         # ── Step 1: Customer & Compliance-Risk stop rules ──────────────
         stop = self._customer_stop_check(case)
         if stop is not None:
-            return self._stopped_recommendation(stop, case, estimates)
+            return self._stopped_recommendation(
+                stop, case, estimates, confidence_probability, tier, confidence_source
+            )
 
         stop = self._compliance_risk_stop_check(case)
         if stop is not None:
-            return self._stopped_recommendation(stop, case, estimates)
+            return self._stopped_recommendation(
+                stop, case, estimates, confidence_probability, tier, confidence_source
+            )
 
         # ── Step 2: Build all candidates with economics ─────────────────
         amount_remaining = case.total_remaining()
@@ -171,6 +294,24 @@ class InterventionOptimizer:
                 stopped=False,
                 stop_reason=None,
                 rejected_reasons=rejected_reasons,
+                requires_human_approval=(
+                    segment == UpliftSegment.SLEEPING_DOG
+                    and confidence_probability is not None
+                ),
+                reasoning=(
+                    "Intervention may reduce payment probability for this "
+                    "Sleeping Dog segment. Best to wait."
+                    if segment == UpliftSegment.SLEEPING_DOG
+                    else "No intervention needed."
+                ),
+                confidence_probability=confidence_probability,
+                confidence_tier=(
+                    ConfidenceTier.HUMAN_REVIEW.value
+                    if segment == UpliftSegment.SLEEPING_DOG
+                    and confidence_probability is not None
+                    else tier.value
+                ),
+                confidence_source=confidence_source,
             )
 
         # ── Step 5: Contact fatigue check ─────────────────────────────
@@ -218,6 +359,9 @@ class InterventionOptimizer:
                 rejected_reasons=rejected_reasons,
                 requires_human_approval=False,
                 reasoning="Financial stop rule triggered — expected incremental recovery below minimum threshold.",
+                confidence_probability=confidence_probability,
+                confidence_tier=tier.value,
+                confidence_source=confidence_source,
             )
 
         # Compute human approval requirement from reversibility, fraud, blast radius
@@ -229,23 +373,58 @@ class InterventionOptimizer:
         )
         blast_status = self._blast_radius.check_global_rate(best.action)
 
-        requires_human = (
+        legacy_requires_human = (
             reversibility_assessment.requires_human_approval
             or fraud_verdict.risk_level in {fraud_verdict.risk_level.HIGH, fraud_verdict.risk_level.CRITICAL}
             or blast_status.circuit_open
         )
 
+        # ── Step 8: Confidence-ladder routing (Track F.2) ─────────────
+        # Armed only when the caller supplied the case's real features; the
+        # model probability and band are the only source of truth.
+        if confidence_probability is not None:
+            # Hard safety flags always override the band → human review.
+            if legacy_requires_human:
+                tier = ConfidenceTier.HUMAN_REVIEW
+            if tier == ConfidenceTier.HIGH:
+                # ≥ high: SMS/WhatsApp reminder + payment link, fully auto.
+                best = self._band_pick(
+                    best, allowed, {Action.SEND_SMS, Action.SEND_WHATSAPP, Action.SEND_PAYMENT_LINK}
+                )
+            elif tier == ConfidenceTier.MEDIUM:
+                # medium..high: auto AI voice nudge (E.8 voice agent).
+                best = self._band_pick(best, allowed, {Action.VOICE_CALL})
+            elif tier == ConfidenceTier.EMERGING:
+                # low..medium: auto, channel via affinity + contact fatigue.
+                best = self._band_channel_pick(best, allowed, case)
+            # tier HUMAN_REVIEW (< low) OR UNKNOWN → route to human below.
+
+        requires_human = legacy_requires_human or (
+            confidence_probability is not None
+            and tier
+            in {ConfidenceTier.HUMAN_REVIEW, ConfidenceTier.UNKNOWN}
+        )
+        requires_human = requires_human or (
+            segment == UpliftSegment.SLEEPING_DOG and confidence_probability is not None
+        )
+
         # Build reasoning string for the action choice
         reasoning = self._build_reasoning(best, case, estimates, segment, requires_human)
+        reasoning = self._append_ladder_note(
+            reasoning, tier, confidence_probability, legacy_requires_human
+        )
 
         logger.info(
-            "Case %s: selected %s (score=%.2f, uplift=%.4f, segment=%s, human=%s)",
+            "Case %s: selected %s (score=%.2f, uplift=%.4f, segment=%s, human=%s, "
+            "tier=%s, conf=%.3f)",
             case.case_id,
             best.action.value,
             best.economic_score,
             estimates.per_action_uplift.get(best.action, 0),
             segment,
             requires_human,
+            tier.value,
+            confidence_probability if confidence_probability is not None else -1.0,
         )
 
         return OptimizationRecommendation(
@@ -257,6 +436,9 @@ class InterventionOptimizer:
             rejected_reasons=rejected_reasons,
             requires_human_approval=requires_human,
             reasoning=reasoning,
+            confidence_probability=confidence_probability,
+            confidence_tier=tier.value,
+            confidence_source=confidence_source,
         )
 
     # ------------------------------------------------------------------
@@ -468,6 +650,9 @@ class InterventionOptimizer:
         reason: RecoveryStopReason,
         case: RecoveryCase,
         estimates: UpliftEstimates,
+        confidence_probability: float | None = None,
+        tier: ConfidenceTier = ConfidenceTier.UNKNOWN,
+        confidence_source: str | None = None,
     ) -> OptimizationRecommendation:
         """Build a recommendation for a stopped case — NO_ACTION + reason."""
         candidates = self.build_candidates(case, estimates)
@@ -484,7 +669,131 @@ class InterventionOptimizer:
             },
             requires_human_approval=False,
             reasoning=f"Stopped by {reason.value.lower()} rule — no automated action permitted.",
+            confidence_probability=confidence_probability,
+            confidence_tier=tier.value,
+            confidence_source=confidence_source,
         )
+
+    # ──────────────────────────────────────────────────────────────────
+    # Track F.2 — confidence-ladder internals
+    # ──────────────────────────────────────────────────────────────────
+
+    def _resolve_confidence(
+        self,
+        case: RecoveryCase,
+        estimates: UpliftEstimates,
+        features: RiskFeatures | None,
+    ) -> tuple[float | None, ConfidenceTier, str | None]:
+        """Real predict_proba from the trained model when the case's features
+        are supplied; otherwise (None, UNKNOWN, None) — never invented."""
+        del estimates
+        if features is None:
+            return None, ConfidenceTier.UNKNOWN, None
+        try:  # noqa: BLE001 — model failure must not crash the loop
+            probability = self._propensity.probability_within(
+                _propensity_dict(features), self._ladder.horizon_hours
+            )
+        except Exception:
+            return None, ConfidenceTier.UNKNOWN, "propensity_v1"
+        source = getattr(self._propensity, "_model_version", None) or "propensity_v1"
+        return probability, self._ladder.tier_for(probability), source
+
+    @staticmethod
+    def _band_pick(
+        current: CandidateAction,
+        allowed: list[CandidateAction],
+        allowed_actions: set[Action],
+    ) -> CandidateAction:
+        """Pick the best of `allowed_actions` that is non-negative, falling
+        back to the current (economically best) candidate otherwise."""
+        subset = [
+            c
+            for c in allowed
+            if c.action in allowed_actions and c.economic_score >= 0.0
+        ]
+        if not subset:
+            return current
+        subset.append(_make_no_action())
+        best = sorted(
+            subset,
+            key=lambda c: (c.economic_score, -c.cx_penalty_paise),
+            reverse=True,
+        )[0]
+        return best if best.action != Action.NO_ACTION else current
+
+    def _band_channel_pick(
+        self,
+        current: CandidateAction,
+        allowed: list[CandidateAction],
+        case: RecoveryCase,
+    ) -> CandidateAction:
+        """EMERGING band: pick the channel the customer converts best on via
+        ChannelAffinity (§5.6), tempered by per-channel contact fatigue."""
+        affinity = self._affinity.affinity_for(case)
+        per_channel = affinity.per_channel_conversion
+        preferred = affinity.preferred_channel
+        per_channel_fatigue: dict[ContactChannel, int] = {}
+        for comm in case.communications:
+            ch = str(comm.get("channel") or comm.get("action") or "")
+            try:
+                key = ContactChannel(ch)
+            except ValueError:
+                continue
+            per_channel_fatigue[key] = per_channel_fatigue.get(key, 0) + 1
+
+        def channel_rank(action: Action) -> float:
+            channel = _ACTION_CHANNELS.get(action)
+            if channel is None:
+                return -1.0
+            base = per_channel.get(channel, 0.0)
+            if channel == preferred:
+                base += 0.05
+            contacts = per_channel_fatigue.get(channel, 0)
+            if contacts >= 1:
+                base *= 0.6
+            if contacts >= 3:
+                base *= 0.4
+            return base
+
+        subset = [
+            c
+            for c in allowed
+            if c.action in _ACTION_CHANNELS and c.economic_score >= 0.0
+        ]
+        if not subset:
+            return current
+        best = sorted(
+            subset,
+            key=lambda c: (channel_rank(c.action), c.economic_score),
+            reverse=True,
+        )[0]
+        if channel_rank(best.action) <= 0.0:
+            return current
+        return best
+
+    @staticmethod
+    def _append_ladder_note(
+        reasoning: str,
+        tier: ConfidenceTier,
+        probability: float | None,
+        legacy_requires_human: bool,
+    ) -> str:
+        """Attach the F.2 confidence basis to the reasoning string (armed only)."""
+        if probability is None:
+            return reasoning
+        note = (
+            f" Confidence tier {tier.value} (model P(pay)={probability:.3f}): "
+        )
+        if tier == ConfidenceTier.HIGH:
+            note += "high model confidence — SMS/WhatsApp reminder + payment link."
+        elif tier == ConfidenceTier.MEDIUM:
+            note += "auto AI voice nudge via the E.8 voice agent."
+        elif tier == ConfidenceTier.EMERGING:
+            note += "auto, channel picked via channel affinity and contact fatigue."
+        else:
+            prefix = "hard safety flag" if legacy_requires_human else "model confidence below the automated threshold"
+            note += f"{prefix} — routed to human review."
+        return reasoning + note
 
 
 # ------------------------------------------------------------------
@@ -503,6 +812,22 @@ def _make_no_action() -> CandidateAction:
         cx_penalty_paise=0,
         economic_score=0.0,
     )
+
+
+def _propensity_dict(features: RiskFeatures) -> dict[str, float]:
+    """Project the model feature vector onto the propensity model's inputs.
+
+    Only the features the propensity model was trained on are forwarded; the
+    hidden ground-truth columns never reach inference (§15.3).
+    """
+    return {
+        "failure_reason": features.failure_reason or "unknown_error",
+        "amount_paise": float(max(0, features.amount_paise)),
+        "days_overdue": float(max(0, features.days_overdue)),
+        "ptp_history_count": float(max(0, features.ptp_history_count)),
+        "previous_retry_success": 1.0 if features.previous_retry_success else 0.0,
+        "hour_of_day": float(features.hour_of_day),
+    }
 
 
 def _extract_fatigue_features(case: RecoveryCase) -> dict[str, float]:

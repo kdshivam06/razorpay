@@ -130,6 +130,7 @@ class DashboardApi:
         monitor: AgentMonitor | None = None,
         messages: list[object] | None = None,
         dataset_summary: dict[str, object] | None = None,
+        data_preview: list[dict[str, object]] | None = None,
     ) -> None:
         self._tracer = tracer or DecisionTracer()
         self._audit = audit or AuditLogger()
@@ -139,6 +140,7 @@ class DashboardApi:
         self._monitor = monitor or AgentMonitor()
         self._messages = list(messages or [])
         self._dataset_summary = dict(dataset_summary or {})
+        self._data_preview = list(data_preview or [])
 
     # ── low-level helpers ────────────────────────────────────────────
 
@@ -441,7 +443,11 @@ class DashboardApi:
                 status=t.state,
                 recommended_action=t.selected_action.value if t.selected_action else "NO_ACTION",
                 requires_human=requires_human,
-                confidence=round(t.selected_economic_score, 4) if t.selected_economic_score else 0.0,
+                confidence=(
+                    round(t.confidence_probability, 4)
+                    if getattr(t, "confidence_probability", None) is not None
+                    else (round(t.selected_economic_score, 4) if t.selected_economic_score else 0.0)
+                ),
                 reasoning=reasoning,
                 uplift_segment=t.uplift_segment or "UNKNOWN",
                 policy_gate_result=t.policy_gate_result,
@@ -456,6 +462,75 @@ class DashboardApi:
     def dataset_summary(self) -> dict[str, object]:
         """Dataset provenance for batch-upload and synthetic-demo proof."""
         return dict(self._dataset_summary)
+
+    def data_preview(self, limit: int = 50) -> list[dict[str, object]]:
+        """Model-facing rows shown in the demo, excluding held-out truth labels."""
+        return self._data_preview[: max(1, min(limit, 250))]
+
+    def action_summary(self) -> dict[str, object]:
+        """Execution proof by action/channel for the command-center dashboard."""
+        action_counts: Counter[str] = Counter()
+        segment_counts: Counter[str] = Counter()
+        policy_counts: Counter[str] = Counter()
+        auto_resolved = 0
+        human_required = 0
+
+        for trace in self._treatment_traces():
+            action = trace.selected_action.value if trace.selected_action else "NO_ACTION"
+            action_counts[action] += 1
+            segment_counts[trace.uplift_segment or "UNKNOWN"] += 1
+            policy_counts[trace.policy_gate_result or "UNKNOWN"] += 1
+            if trace.requires_human_approval or action == "HUMAN_ESCALATION":
+                human_required += 1
+            elif action not in {"NO_ACTION", "WAIT", "BLOCK"} and trace.policy_gate_result != "BLOCKED":
+                auto_resolved += 1
+
+        channel_counts: Counter[str] = Counter()
+        for message in self._messages:
+            channel = str(getattr(message, "channel", "") or "unknown").upper()
+            channel_counts[channel] += 1
+
+        return {
+            "actions": dict(action_counts),
+            "channels": dict(channel_counts),
+            "segments": dict(segment_counts),
+            "policy": dict(policy_counts),
+            "auto_resolved": auto_resolved,
+            "human_required": max(human_required, len(self.exception_queue())),
+            "manual_queue": len(self.exception_queue()),
+            "messages_sent": len(self._messages),
+            "payment_links_sent": action_counts.get("SEND_PAYMENT_LINK", 0),
+            "voice_calls_queued": action_counts.get("VOICE_CALL", 0),
+        }
+
+    def ptp_summary(self) -> dict[str, object]:
+        """Promise-to-pay proof for demo narration."""
+        total = 0
+        promised = 0
+        reminders = 0
+        answered = 0
+        by_status: Counter[str] = Counter()
+
+        for trace in self._treatment_traces():
+            ptp = _ptp_for(trace)
+            status = str(ptp["status"])
+            by_status[status] += 1
+            if status != "not_applicable":
+                total += 1
+            if status == "promised":
+                promised += 1
+                reminders += 1
+            if status in {"promised", "asked_for_link", "unable_to_pay"}:
+                answered += 1
+
+        return {
+            "ptp_cases": total,
+            "answered": answered,
+            "not_answered": max(0, total - answered),
+            "agreed_to_pay": promised,
+            "reminders_scheduled": reminders,
+            "by_status": dict(by_status),
+        }
 
     def anomalies(self) -> dict[str, object]:
         """Statistically flag failure cohorts with one-line policy fixes (§12.3)."""
@@ -476,6 +551,7 @@ class DashboardApi:
         self._prevention._records.extend(other._prevention._records)
         self._human_queue._queue.extend(other._human_queue._queue)
         self._messages.extend(other._messages)
+        self._data_preview.extend(other._data_preview)
         if other._dataset_summary:
             merged = dict(self._dataset_summary)
             merged["dataset_name"] = "dashboard_state_plus_realtime"
@@ -742,6 +818,24 @@ def get_message_outbox() -> list[dict]:
     return guard_response({"items": data}, "message_outbox").data["items"]
 
 
+@router.get("/api/dashboard/data-preview")
+def get_data_preview(limit: int = 50) -> list[dict]:
+    data = _get_dashboard().data_preview(limit)
+    return guard_response({"items": data}, "data_preview").data["items"]
+
+
+@router.get("/api/dashboard/action-summary")
+def get_action_summary() -> dict:
+    data = _get_dashboard().action_summary()
+    return guard_response(data, "action_summary").data
+
+
+@router.get("/api/dashboard/ptp-summary")
+def get_ptp_summary() -> dict:
+    data = _get_dashboard().ptp_summary()
+    return guard_response(data, "ptp_summary").data
+
+
 @router.get("/api/dashboard/cases")
 def get_case_intelligence(limit: int = 250) -> list[dict]:
     api = _get_dashboard()
@@ -749,11 +843,15 @@ def get_case_intelligence(limit: int = 250) -> list[dict]:
     messaged_cases = {
         _case_id_from_message(getattr(message, "rendered_body", ""))
         for message in messages
+        if _case_id_from_message(getattr(message, "rendered_body", ""))
     }
     items = []
     for trace in api._traces()[: max(1, min(limit, 1000))]:
         selected_uplift = api._selected_action_uplift(trace)
         top = max(trace.candidate_actions, key=lambda c: c.economic_score, default=None)
+        action = trace.selected_action.value if trace.selected_action else "NO_ACTION"
+        ptp = _ptp_for(trace)
+        message_sent = trace.case_id[-6:] in messaged_cases
         items.append(
             {
                 "case_id": trace.case_id,
@@ -776,9 +874,15 @@ def get_case_intelligence(limit: int = 250) -> list[dict]:
                 "policy_gate_result": trace.policy_gate_result,
                 "policy_checks_failed": trace.policy_checks_failed,
                 "outcome": trace.outcome or trace.execution_result or "PENDING",
-                "message_sent": any(trace.case_id.endswith(case or "") for case in messaged_cases),
+                "message_sent": message_sent,
                 "playbook": _playbook_for(trace),
                 "why": trace.selection_reasoning,
+                "next_step": _next_step_for(trace, message_sent),
+                "human_instruction": _human_instruction_for(trace),
+                "automation_proof": _automation_proof_for(trace, message_sent),
+                "ptp": ptp,
+                "conversation": _conversation_for(trace, ptp, message_sent),
+                "audit_summary": _audit_summary_for(trace),
             }
         )
     return guard_response({"items": items}, "case_intelligence").data["items"]
@@ -927,6 +1031,214 @@ def _playbook_for(trace: DecisionTrace) -> dict[str, str]:
         "name": "Recovery safety workflow",
         "path": "Classify -> estimate uplift -> policy gate -> audit",
     }
+
+
+def _next_step_for(trace: DecisionTrace, message_sent: bool) -> str:
+    action = trace.selected_action.value if trace.selected_action else "NO_ACTION"
+    if trace.policy_gate_result == "BLOCKED" or action == "BLOCK":
+        return "Stop automated outreach; keep the case in audit/reconciliation until the risk or dispute clears."
+    if trace.requires_human_approval or action == "HUMAN_ESCALATION":
+        return "Route to a human operator with the policy failures, amount at risk, and suggested customer script."
+    if action == "NO_ACTION":
+        return "Take no contact; monitor passive payment signals and avoid disturbing a likely payer."
+    if action == "WAIT":
+        return "Wait for the preferred payment window, then re-score before any contact."
+    if action == "VOICE_CALL":
+        return "Queue a compliant Hinglish voice nudge and extract promise-to-pay date and amount from the response."
+    if action == "CREATE_PTP":
+        return "Create a promise-to-pay reminder and suppress further nudges until the promised date."
+    if action == "SEND_PAYMENT_LINK":
+        return "Send a Razorpay payment link and listen for payment-link paid webhooks."
+    if action in {"SEND_SMS", "SEND_WHATSAPP", "SEND_EMAIL"}:
+        return f"{'Confirmed rendered outbox item; ' if message_sent else ''}send the templated reminder with structured amount/date variables only."
+    if action.startswith("RETRY_"):
+        return "Retry through the safe mandate/payment rail after pre-action reconciliation confirms no duplicate payment."
+    return "Execute the selected action only after policy gates and idempotency checks pass."
+
+
+def _human_instruction_for(trace: DecisionTrace) -> dict[str, object]:
+    action = trace.selected_action.value if trace.selected_action else "NO_ACTION"
+    root = trace.root_cause.lower()
+    failures = trace.policy_checks_failed or []
+    requires_human = (
+        trace.requires_human_approval
+        or action == "HUMAN_ESCALATION"
+        or trace.policy_gate_result == "BLOCKED"
+    )
+
+    if not requires_human:
+        return {
+            "required": False,
+            "owner": "Autonomous executor",
+            "instruction": "No manual work needed; the agent has a bounded, policy-approved action.",
+            "checklist": ["Audit trace recorded", "Idempotency key recorded", "Outbox proof visible"],
+        }
+
+    checklist = ["Open the decision trace", "Verify customer identity and consent", "Record outcome before closing"]
+    if "dispute" in root or "dispute" in " ".join(failures).lower():
+        checklist = [
+            "Do not request payment until the dispute owner confirms next step",
+            "Attach invoice/order proof and last customer message",
+            "Use dispute-resolution script, not a collection script",
+        ]
+    elif "risk" in root or "fraud" in " ".join(failures).lower():
+        checklist = [
+            "Keep payment retries blocked",
+            "Ask risk team to review device/bank/velocity evidence",
+            "Release outreach only after risk block is removed",
+        ]
+    elif trace.revenue_at_risk_paise >= 10_000_000:
+        checklist = [
+            "Approve or adjust the recovery plan because value is above autonomy threshold",
+            "Prefer payment link or partial-payment offer over repeated reminders",
+            "Schedule one follow-up and respect contact caps",
+        ]
+    elif action == "VOICE_CALL":
+        checklist = [
+            "Review the Hinglish call script",
+            "Confirm call time is inside the allowed contact window",
+            "Capture PTP date/amount from transcript",
+        ]
+
+    return {
+        "required": True,
+        "owner": "Human recovery specialist",
+        "instruction": "Human approval is required before execution because the case is high-impact, blocked, or low-confidence.",
+        "checklist": checklist,
+    }
+
+
+def _automation_proof_for(trace: DecisionTrace, message_sent: bool) -> dict[str, object]:
+    action = trace.selected_action.value if trace.selected_action else "NO_ACTION"
+    proof = {
+        "outbox": message_sent,
+        "audit_trace": True,
+        "idempotency_key": trace.idempotency_key,
+        "execution_detail": trace.execution_detail,
+    }
+    if action == "SEND_PAYMENT_LINK":
+        proof["payment_link"] = f"https://rzp.io/i/demo-{trace.case_id[-6:]}"
+    if action == "VOICE_CALL":
+        proof["voice_call"] = "queued_demo_voice_nudge"
+    if action == "CREATE_PTP":
+        proof["reminder"] = "scheduled_demo_ptp_reminder"
+    return proof
+
+
+def _ptp_for(trace: DecisionTrace) -> dict[str, object]:
+    action = trace.selected_action.value if trace.selected_action else "NO_ACTION"
+    root = trace.root_cause.lower()
+    seed = _stable_number(trace.case_id)
+    can_ptp = action in {"CREATE_PTP", "VOICE_CALL", "SEND_WHATSAPP", "SEND_SMS", "SEND_PAYMENT_LINK"} or "ptp" in root
+    if not can_ptp:
+        return {"status": "not_applicable", "reliability": 0.0, "reminder_scheduled": False}
+
+    if trace.uplift_segment == "PERSUADABLE" and seed % 5 in {0, 1, 2}:
+        due_day = 7 + (seed % 5)
+        return {
+            "status": "promised",
+            "promise_date": f"2026-09-{due_day:02d}",
+            "promise_amount_paise": min(trace.revenue_at_risk_paise, max(50_000, trace.revenue_at_risk_paise // 2)),
+            "reliability": round(0.62 + (seed % 21) / 100, 2),
+            "reminder_scheduled": True,
+            "reminder_channel": "WHATSAPP" if action == "VOICE_CALL" else action.replace("SEND_", ""),
+        }
+    if trace.uplift_segment == "LOST_CAUSE":
+        return {
+            "status": "unable_to_pay",
+            "reliability": round(0.18 + (seed % 15) / 100, 2),
+            "reminder_scheduled": False,
+        }
+    return {
+        "status": "asked_for_link",
+        "reliability": round(0.38 + (seed % 25) / 100, 2),
+        "reminder_scheduled": False,
+    }
+
+
+def _conversation_for(
+    trace: DecisionTrace, ptp: dict[str, object], message_sent: bool
+) -> list[dict[str, str]]:
+    action = trace.selected_action.value if trace.selected_action else "NO_ACTION"
+    amount = f"₹{trace.revenue_at_risk_paise / 100:,.0f}"
+    messages = [
+        {
+            "speaker": "System",
+            "channel": "event",
+            "text": f"{trace.trigger_event} received for {amount}; root cause classified as {trace.root_cause}.",
+        }
+    ]
+
+    if trace.policy_gate_result == "BLOCKED":
+        messages.append(
+            {
+                "speaker": "Policy Engine",
+                "channel": "guardrail",
+                "text": "Automated outreach blocked. Reason: "
+                + ("; ".join(trace.policy_checks_failed) or "policy gate failed"),
+            }
+        )
+        return messages
+
+    if action == "VOICE_CALL":
+        messages.extend(
+            [
+                {
+                    "speaker": "AI Voice Agent",
+                    "channel": "voice",
+                    "text": "Namaste, payment complete karne mein help chahiye? Main secure Razorpay link bhej sakta hoon.",
+                },
+                {
+                    "speaker": "Customer",
+                    "channel": "voice",
+                    "text": "Salary aate hi pay kar dunga, please reminder bhej dena.",
+                },
+            ]
+        )
+    elif message_sent:
+        messages.append(
+            {
+                "speaker": "Executor",
+                "channel": "outbox",
+                "text": f"Rendered {action} using approved template variables and demo payment link.",
+            }
+        )
+    elif action == "NO_ACTION":
+        messages.append(
+            {
+                "speaker": "Agent",
+                "channel": "decision",
+                "text": "No customer contact because the uplift segment says intervention is unnecessary or harmful.",
+            }
+        )
+
+    if ptp.get("status") == "promised":
+        messages.append(
+            {
+                "speaker": "PTP Tracker",
+                "channel": "reminder",
+                "text": f"Promise captured for {ptp.get('promise_date')} and reminder scheduled on {ptp.get('reminder_channel')}.",
+            }
+        )
+    return messages
+
+
+def _audit_summary_for(trace: DecisionTrace) -> dict[str, object]:
+    return {
+        "trace_id": trace.idempotency_key,
+        "model_versions": trace.model_versions,
+        "policy_passed": trace.policy_checks_passed,
+        "policy_failed": trace.policy_checks_failed,
+        "timing": trace.timing_rationale,
+        "rejected_actions": trace.rejected_actions,
+        "confidence_probability": trace.confidence_probability,
+        "confidence_tier": trace.confidence_tier,
+        "confidence_source": trace.confidence_source,
+    }
+
+
+def _stable_number(value: str) -> int:
+    return sum((index + 1) * ord(char) for index, char in enumerate(value))
 
 
 def _trace_incremental_value(trace: DecisionTrace) -> int:

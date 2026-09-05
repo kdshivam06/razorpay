@@ -23,6 +23,7 @@ class HumanTask:
     action: Action
     proposed_reasoning: str
     sla_minutes: int
+    amount_paise: int = 0
     created_at: float = dataclasses.field(default_factory=time.time)
 
     def __lt__(self, other: Any) -> bool:

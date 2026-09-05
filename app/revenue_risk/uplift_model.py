@@ -100,6 +100,12 @@ class IncrementalUpliftModel:
     ) -> float:
         if action is Action.NO_ACTION:
             return baseline
+        heuristic_uplift = _heuristic_uplift(features, action)
+        heuristic_probability = round(
+            _clamp(baseline + heuristic_uplift, 0.0, 1.0), 4
+        )
+        if heuristic_uplift < -0.025:
+            return heuristic_probability
         if self._estimator is not None and self._vectorizer is not None:
             clean = _with_treatment(_clean(features, self._feature_columns), action)
             try:
@@ -108,12 +114,16 @@ class IncrementalUpliftModel:
                         0
                     ][1]
                 )
-                return round(_clamp(probability, 0.0, 1.0), 4)
+                model_probability = round(_clamp(probability, 0.0, 1.0), 4)
+                model_uplift = model_probability - baseline
+                if heuristic_uplift >= 0.08:
+                    return max(model_probability, heuristic_probability)
+                if abs(model_uplift) > 0.30 and heuristic_uplift < 0.08:
+                    return heuristic_probability
+                return model_probability
             except (IndexError, ValueError):
                 pass
-        return round(
-            _clamp(baseline + _heuristic_uplift(features, action), 0.0, 1.0), 4
-        )
+        return heuristic_probability
 
 
 def train(
